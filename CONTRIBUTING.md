@@ -20,7 +20,7 @@ can cost a console's drive.
   measurement.
 - [docs/wireless-adapter.md](docs/wireless-adapter.md): the GBA Wireless Adapter's emulation
   (protocol, design, tests).
-- [docs/rom-patching.md](docs/rom-patching.md): plan of a feature in progress.
+- [docs/rom-patching.md](docs/rom-patching.md): ROM patching's design, decisions and tests.
 - Coding agents: link this file as the agent's instructions (e.g. `ln -s CONTRIBUTING.md
   CLAUDE.md` for Claude Code; `CLAUDE.md` is gitignored) and keep personal notes (your consoles,
   preferences) in `CLAUDE.local.md`, also gitignored.
@@ -95,10 +95,17 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   ROM in RPCS3's folder with random input, ~30 s, and prints the first differing frame and value
   per game. Expected: Emerald, FireRed and Unbound differ in sound only (the sample clock fix in
   `skip-sound-samples.patch`).
+- ROM patching, no game needed: `tools/patch_test.sh` makes synthetic ROMs and IPS, UPS and BPS
+  patches (`tools/make_patch_tests.py`: a hack chain, a 16 MB+ ROM, a damaged patch, another
+  version) and applies them with mGBA's patch code, natively and on a big-endian CPU (s390x under
+  qemu, in a small Docker image built on first use). The same files test the app's own flow:
+  copy the `.gba` files to `roms/` and the patches to `patches/` (RPCS3's drive or the console's),
+  then `<player> PATCH <text>` picks one in the list.
 - Phone server: `NET=1 tools/rpcs3.sh run` (network on for that run only), then
-  `tools/webtest.sh` runs uploads, downloads, names and every refusal (bad token, traversal,
-  oversized, cut and stalled uploads) with curl against `127.0.0.1:8000` and removes what it
-  added. Check the page in a real browser too: a script error leaves every button dead.
+  `tools/webtest.sh` runs uploads (games, saves, covers, patches), downloads, names and every
+  refusal (bad token, traversal, oversized, cut and stalled uploads) with curl against
+  `127.0.0.1:8000` and removes what it added. Check the page in a real browser too: a script
+  error leaves every button dead.
 - RPCS3 (macOS): `tools/rpcs3.sh run|cmd|shot|log` (`PPU=interp|llvm` forces the PPU decoder,
   `RES=1280x720` another output resolution for layout checks). It runs `ps3gba.self`, which has
   an RWX code segment for the JIT; the pkg's EBOOT.BIN for real hardware keeps R-X. Configure
@@ -130,9 +137,10 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   afterwards; CHECK runs both and logs frames that differ), `<player> GAME <text>` (moves the
   player's carousel to the first game whose file name contains the text, switching to its
   system's catalog: scripts must not count presses in the carousel, its order changes with the
-  library), `<player> HOLD <button> <frames>` (a longer press, e.g. to walk), `<player> LINK
-  ON|OFF` (the pause menu's cable switch, for a running GBA game), `<player> WIRELESS ON|OFF` (its
-  Wireless Adapter switch),
+  library), `<player> PATCH <text>` (selects the first patch whose file name contains the text in
+  the player's patch list, waiting until it is read), `<player> HOLD <button> <frames>` (a longer
+  press, e.g. to walk), `<player> LINK ON|OFF` (the pause menu's cable switch, for a running GBA
+  game), `<player> WIRELESS ON|OFF` (its Wireless Adapter switch),
   `INTRO <frame> [<frames since Start>]` (holds one frame of the welcome screen, for
   screenshots), `FRAME <n>` (draws the UI's animations as at frame n, -1 for live: pixel diffs of
   two builds), `MENU` (opens the main menu; player commands then drive the menus instead of
@@ -144,7 +152,8 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   scripts send input right after `ready:`.
 - Menus: Cross confirms, Circle goes back; L3/R3 opens the pause menu; Triangle on a save opens
   its options (rename, copy, delete; on the keyboard Square deletes a character, Start is OK),
-  Triangle on the game carousel shows the player's phone QR code; L1/R1 switch catalogs. Games
+  Triangle on the game carousel shows the player's phone QR code, Square its patches; L1/R1
+  switch catalogs. Games
   start unplugged; 2+ plugged GBAs on a cable are linked, the first plugged in is the parent.
 - The log (`/dev_hdd0/ps3gba/log.txt`) prints every second: fps, per-phase timings, per-player
   emulation ms, the menu music's decoding cost, the heard game's audio (silence padded, queue
@@ -161,7 +170,8 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
 - `source/main.c` input, the main menu's state (shared screens: menu, About, Help, then the
   slots; an iris between the menu and the join screen, where Circle goes back while no one has
   joined), per-player state machine (join, games, saves, save options and rename keyboard,
-  playing, paused, phone), main loop, dev tools.
+  playing, paused, phone, patches: list, confirmation, building, cleanup question, error), main
+  loop, dev tools. No game starts while a patch job runs (`rompatch_busy`, a refusal toast).
 - `source/emu.c` mGBA cores: one lv2 thread per player (it also loads the game), frame
   handshake, saves (atomic writes), ROM cache (one copy per game, shared), link cable
   (`emu_link_set` from the pause menu; the player's own thread plugs/unplugs between slices;
@@ -188,8 +198,9 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   mismatch goes to the log), `jitprof` logs where GBA instructions run.
 - `source/ui.c` all drawing (background, main menu, About credits, Help with the manual's QR
   code, join screen, carousel with its catalog tabs, saves list, save options and keyboard, phone
-  QR code, game frame, pause). Every menu ends with a legend of the buttons that do something
-  there (`hint_row`), one row even in a 2x2 slot at 720p.
+  QR code, patch list and its boxes (`menu_box` with a wrapped text), game frame, pause). Every
+  menu ends with a legend of the buttons that do something there (`hint_row`), one row even in a
+  2x2 slot at 720p (`hint_row_in` tightens the gaps when it must).
 - `source/intro.c` welcome screen: the XMB icon animated (the PS3 juggles the GBAs until Start or
   Cross, then an iris closes on its wink and opens on the main menu). Under PRESS START, retro
   quotes (`quotes[]`) type in and erase in turn; bottom right, barely visible, the credit and the
@@ -204,8 +215,15 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   else the UI draws a blank Game Pak of the system. Save lists and save rename/copy/delete run on
   its worker thread. Never overwrites a save; a save someone plays or another player is renaming,
   copying or deleting is refused (`save_taken` in main.c).
+- `source/rompatch.c` ROM patching (`docs/rom-patching.md`) on a thread of its own (1250, below the
+  emulators): lists the `patches/` that fit a game (UPS/BPS footer checksum against the ROM's
+  CRC32, cached per file version; greyed when made for another ROM with the game's header code;
+  every IPS), builds `roms/<patch name>.<base's extension>` with mGBA's patch code (temporary file
+  in `tmp/`, renamed, never over a game), records it in `patches/built-games.txt`, and deletes
+  the patch and a chain's intermediate ROM (recorded, same checksum, no saves) on request.
 - `source/web.c` phone web server (port 8000): the player's page (`data/phone.html`, embedded)
-  adds games (each checked by mGBA's header test), covers and saves (always as a new save),
+  adds games (each checked by mGBA's header test), covers, saves (always as a new save) and
+  patches (`.ips/.ups/.bps`, checked by their first bytes, into `patches/`),
   downloads saves and sets the player's name. URLs carry a per-boot token per player. Uploads
   stream to `ps3gba/tmp/` and are renamed into place whole; new games come in through
   `library_rescan()` (off-thread, swapped in between frames). Games without a cover get their box
@@ -214,6 +232,7 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
 - `source/audio.c` PS3 audio port feeding (the heard player's game) and the menu music
   (`data/music.ogg`, decoded with `third_party/stb_vorbis`). `source/art.c` generated sprites.
 - `tests/jitprobe/` standalone app probing which memory is executable (`tools/jitprobe.sh`).
+- `tests/patch/harness.c` the ROM patching check run by `tools/patch_test.sh`.
 
 ## Rules
 

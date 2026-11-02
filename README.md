@@ -18,8 +18,11 @@ No games are included: use dumps of the cartridges you own.
   GBA Wireless Adapter for games that use it, such as the Union Room of Pokemon FireRed (up to 4
   players).
 - Manage saves: several per game, rename, copy, delete.
-- Add games, covers and saves from your phone: each player scans a QR code and gets a small web
-  page, working only on the same network as the PS3. Missing box art is fetched automatically.
+- Play hacks and translations distributed as patches (`.ips`, `.ups`, `.bps`): the PS3 applies the
+  patch to your game and adds the result as a new game, no PC needed.
+- Add games, covers, saves and patches from your phone: each player scans a QR code and gets a
+  small web page, working only on the same network as the PS3. Missing box art is fetched
+  automatically.
 - A pixel-art menu with music, a 60 fps display, and the sound of player 1's game (or of the
   first player in a game).
 
@@ -44,6 +47,20 @@ No games are included: use dumps of the cartridges you own.
 
 In game: Cross is A, Circle is B, L3 or R3 opens the pause menu (resume, quit, link cable,
 wireless adapter, frame rate). Every menu shows which buttons do what at the bottom.
+
+### Hacks and translations (patches)
+
+1. Copy the patch to `/dev_hdd0/ps3gba/patches/` over FTP, or add it from the phone page.
+2. Make sure every player has quit their game, then press Square on the game the patch is made
+   for. UPS and BPS patches record which version of a game they need: the ones made for this exact
+   ROM are listed, the ones made for another version of it are greyed out. IPS patches can't be
+   checked and are always listed.
+3. Pick the patch and confirm: the new game, named after the patch, appears next to the others
+   with its own saves. Then ps3gba offers to delete the patch file, and for a chain (a translation
+   of a hack, built from that hack) the hack in between if nobody has saves for it. Your own game
+   files are never deleted.
+
+xdelta patches aren't supported, and an IPS patch can't change anything past 16 MB.
 
 ## How it works, in short
 

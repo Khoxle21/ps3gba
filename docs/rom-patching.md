@@ -1,8 +1,10 @@
-# ROM patching: plan
+# ROM patching
 
-Status: planned (2026-11-02), nothing implemented. Goal: hacks and translations distributed as
-patches (no ROM inside) become playable without a PC tool. The player picks a game they own and a
-patch made for it; the PS3 builds the patched ROM once, which then appears as a normal game.
+Status: implemented (2026-11-03, `source/rompatch.c`), tested in RPCS3 (synthetic files and a real
+FireRed -> Unbound -> French Unbound chain); console results below. Goal: hacks and translations
+distributed as patches (no ROM inside) become playable without a PC tool. The player picks a game
+they own and a patch made for it; the PS3 builds the patched ROM once, which then appears as a
+normal game. The plan follows as written, then what was decided while building it.
 
 ## Behavior
 
@@ -46,6 +48,31 @@ patch made for it; the PS3 builds the patched ROM once, which then appears as a 
 Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't change bytes past
 16 MB (24-bit offsets: a format limit, relevant for 32 MB ROMs).
 
+## Decisions taken while building it
+
+- **Listing**: UPS/BPS made for this ROM: listed ("FOR THIS VERSION"). Made for another ROM of the
+  library with this game's header code (`library_same_game`: GBA code without its region letter,
+  which hacks keep): greyed, "FOR ANOTHER VERSION", and picking it shows the refusal. Made for a
+  ROM not in the library: not listed. Every IPS, and files with a patch extension but not a patch
+  format: "VERSION NOT CHECKED" (building an unrecognized one says it is damaged). A patch whose
+  game already exists: greyed, "ALREADY BUILT". The checksums of the other versions are only
+  computed when a patch needs them, then cached per file version (name, size, date) for the
+  session.
+- **Nobody plays**: the list shows the message instead of the patches; a build or cleanup job
+  refuses Cross in the carousel and in the saves list with a toast in place of the legend ("WAIT:
+  A GAME IS BEING PATCHED"). One job for everyone at a time; a second player's confirmation is
+  answered "ANOTHER PLAYER IS PATCHING A GAME".
+- **Building** shows its step (reading, applying, writing). Before writing, the drive's free space
+  is read with lv2's `sys_fs_disk_free` (syscall 840; skipped if it fails). The output name drops
+  a ROM extension the patch's name may carry ("Hack.gba.ups" -> "Hack").
+- **Cleanup** rows: KEEP, DELETE (the patch), and in a chain DELETE BOTH (the patch and the
+  intermediate ROM). The record is `patches/built-games.txt`; a ROM counts as built only if a line
+  names it with its current checksum, and DELETE BOTH checks that again, with no saves, right
+  before deleting (its empty saves folder goes too). The questions show over the carousel, on
+  the new game.
+- **mGBA's patch code** needed `patches/mgba/patch-formats-big-endian.patch`: it read numbers as
+  little-endian (every UPS/BPS refused on the PS3), and sized IPS results 16 MB always.
+
 ## Implementation notes
 
 - **mGBA's patch code** (already in our libmgba: `src/util/patch.c`, `patch-ips.c`,
@@ -74,6 +101,8 @@ Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't cha
   patches for it (UPS's format is simple to write); a host-side check builds the result with
   mGBA's patch code and compares it with the expected bytes. Run in Docker like
   `tools/mgba_exact.sh`. Nothing copyrighted involved, so it can live in the repo.
+  Done: `tools/patch_test.sh` (`tools/make_patch_tests.py`, `tests/patch/harness.c`), BPS too,
+  natively and big-endian; `tools/webtest.sh` covers patch uploads.
 - **With real files** (kept out of the repo): a ROM and a BPS hack or translation patch for it,
   in RPCS3 then on the console: list, wrong-version refusal, build, play, save, rescan; the
   "nobody playing" refusal with a game running; a phone upload of a patch; the cleanup question

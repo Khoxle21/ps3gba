@@ -216,6 +216,14 @@ Dockerfile). Verify with `ppu-objdump -d` that no `std`/`stdx` remains in hot pa
   it runs pristine mGBA and ours side by side on every GBA ROM with random input and compares
   per-frame hashes of video, memory, state, sound, cycles and registers, in ~30 s. Test every
   mGBA patch with it.
+- **mGBA's ROM patch code (IPS, UPS, BPS) was little-endian only** (found 2026-11-03): it read
+  the UPS/BPS checksums and the IPS offsets, sizes and end marker straight into native integers,
+  so on the PPU `loadPatch` refused every UPS and BPS (its own checksum never matched) and IPS
+  records were misread. Fixed by `patches/mgba/patch-formats-big-endian.patch`, which also sizes
+  an IPS result to its furthest record (mGBA always made 16 MB: 32 MB ROMs were cut). The host
+  test can't see such bugs on a little-endian Mac or PC: `tools/patch_test.sh` also runs on s390x
+  under qemu (Debian's arm64 hosts have no big-endian PowerPC cross compiler), with
+  `-D__BIG_ENDIAN__`, which mGBA's byte order macros need and only PowerPC GCC defines.
 - **Set the video buffer before `reset()`**, or no renderer is attached (black screen).
 - Silence the default logger: it prints every DMA/BIOS call.
 - Saves: hook the memory VFile's `sync` (mGBA calls it once a save has settled) and write
