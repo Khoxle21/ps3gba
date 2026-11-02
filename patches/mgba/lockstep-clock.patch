@@ -1,0 +1,17 @@
+A GBA left alone on its link cable got the cable's clock set to its raw time instead of its
+lockstep time, and the next GBA plugged in slept until it caught up, up to 2^31 cycles
+(docs/ps3-homebrew-notes.md).
+
+diff --git a/src/gba/sio/lockstep.c b/src/gba/sio/lockstep.c
+index a211f44e7..c50660c76 100644
+--- a/src/gba/sio/lockstep.c
++++ b/src/gba/sio/lockstep.c
+@@ -735,7 +735,7 @@ void _reconfigPlayers(struct GBASIOLockstepCoordinator* coordinator) {
+ 		coordinator->attachedPlayers[0] = p0;
+ 
+ 		struct GBASIOLockstepPlayer* player = TableIteratorGetValue(&coordinator->players, &iter);
+-		coordinator->cycle = mTimingCurrentTime(&player->driver->d.p->p->timing);
++		coordinator->cycle = GBASIOLockstepTime(player);
+ 		coordinator->nextHardSync = HARD_SYNC_INTERVAL;
+ 
+ 		if (player->playerId != 0) {

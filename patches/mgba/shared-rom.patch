@@ -1,0 +1,170 @@
+GPIO carts (RTC) and big ROMs whose game touches AGB print made mGBA copy the whole ROM, 32 MB
+per player: 4 Unbound players ran out of memory. GPIO registers now read from the cartridge's
+state and AGB print never maps into the ROM, so players running the same game share one
+read-only ROM (docs/performance-plan.md).
+
+diff --git a/src/gba/cart/gpio.c b/src/gba/cart/gpio.c
+index f714cf858..ce7b9a4fa 100644
+--- a/src/gba/cart/gpio.c
++++ b/src/gba/cart/gpio.c
+@@ -100,15 +100,7 @@ void GBAHardwareGPIOWrite(struct GBACartridgeHardware* hw, uint32_t address, uin
+ 	default:
+ 		mLOG(GBA_HW, WARN, "Invalid GPIO address");
+ 	}
+-	if (hw->readWrite) {
+-		STORE_16(hw->pinState, 0, hw->gpioBase);
+-		STORE_16(hw->direction, 2, hw->gpioBase);
+-		STORE_16(hw->readWrite, 4, hw->gpioBase);
+-	} else {
+-		hw->gpioBase[0] = 0;
+-		hw->gpioBase[1] = 0;
+-		hw->gpioBase[2] = 0;
+-	}
++	// ps3gba: the registers are read from this state (gba/memory.c), not stored into the ROM
+ }
+ 
+ void GBAHardwareInitRTC(struct GBACartridgeHardware* hw) {
+@@ -149,9 +141,6 @@ void _readPins(struct GBACartridgeHardware* hw) {
+ void _outputPins(struct GBACartridgeHardware* hw, unsigned pins) {
+ 	hw->pinState &= hw->direction;
+ 	hw->pinState |= (pins & ~hw->direction & 0xF);
+-	if (hw->readWrite) {
+-		STORE_16(hw->pinState, 0, hw->gpioBase);
+-	}
+ }
+ 
+ // == RTC
+@@ -536,19 +525,6 @@ void GBAHardwareDeserialize(struct GBACartridgeHardware* hw, const struct GBASer
+ 	hw->direction = state->hw.pinDirection & 0xF;
+ 	hw->devices = state->hw.devices;
+ 
+-	if ((hw->devices & HW_GPIO) && hw->gpioBase) {
+-		// TODO: This needs to update the pristine state somehow
+-		if (hw->readWrite) {
+-			STORE_16(hw->pinState, 0, hw->gpioBase);
+-			STORE_16(hw->direction, 2, hw->gpioBase);
+-			STORE_16(hw->readWrite, 4, hw->gpioBase);
+-		} else {
+-			hw->gpioBase[0] = 0;
+-			hw->gpioBase[1] = 0;
+-			hw->gpioBase[2] = 0;
+-		}
+-	}
+-
+ 	hw->rtc.sioOutput = GBASerializedHWFlags3GetRtcSioOutput(state->hw.flags3);
+ 
+ 	LOAD_32(hw->rtc.bytesRemaining, 0, &state->hw.rtcBytesRemaining);
+diff --git a/src/gba/memory.c b/src/gba/memory.c
+index aa01fdcc7..238263a10 100644
+--- a/src/gba/memory.c
++++ b/src/gba/memory.c
+@@ -29,6 +29,26 @@ static uint8_t _deadbeef[4] = { 0x10, 0xB7, 0x10, 0xE7 }; // Illegal instruction
+ static const uint32_t _agbPrintFunc = 0x4770DFFA; // swi 0xFA; bx lr
+ 
+ static void GBASetActiveRegion(struct ARMCore* cpu, uint32_t region);
++
++// ps3gba: GPIO registers read from the cartridge's state instead of being stored into the ROM, so
++// GPIO carts (RTC) keep sharing one read-only ROM and never copy it (32 MB per player). Write-only
++// GPIO reads the ROM, as on hardware.
++static inline uint16_t _gpioLoad16(const struct GBAMemory* memory, uint32_t offset, uint16_t rom) {
++	if (!(memory->hw.devices & HW_GPIO) || memory->hw.readWrite != GPIO_READ_WRITE) {
++		return rom;
++	}
++	switch (offset) {
++	case GPIO_REG_DATA:
++		return memory->hw.pinState;
++	case GPIO_REG_DIRECTION:
++		return memory->hw.direction;
++	case GPIO_REG_CONTROL:
++		return memory->hw.readWrite;
++	default:
++		return rom;
++	}
++}
++#define IS_GPIO_AREA(offset) (((offset) & ~0xF) == 0xC0)
+ static int32_t GBAMemoryStall(struct ARMCore* cpu, int32_t wait);
+ static int32_t GBAMemoryStallVRAM(struct GBA* gba, int32_t wait, int extra);
+ 
+@@ -144,10 +164,6 @@ void GBAMemoryReset(struct GBA* gba) {
+ 		gba->isPristine = false;
+ 	}
+ 
+-	if (gba->memory.hw.devices & HW_GPIO) {
+-		_pristineCow(gba);
+-	}
+-
+ 	GBASavedataReset(&gba->memory.savedata);
+ 	GBAHardwareReset(&gba->memory.hw);
+ 	GBADMAReset(gba);
+@@ -426,6 +442,10 @@ static void GBASetActiveRegion(struct ARMCore* cpu, uint32_t address) {
+ 	wait += waitstatesRegion[address >> BASE_OFFSET]; \
+ 	if ((address & (GBA_SIZE_ROM0 - 4)) < memory->romSize) { \
+ 		LOAD_32(value, address & (GBA_SIZE_ROM0 - 4), memory->rom); \
++		if (UNLIKELY(IS_GPIO_AREA(address & (GBA_SIZE_ROM0 - 4)))) { \
++			value = _gpioLoad16(memory, address & (GBA_SIZE_ROM0 - 4), value) | \
++			        _gpioLoad16(memory, (address & (GBA_SIZE_ROM0 - 4)) + 2, value >> 16) << 16; \
++		} \
+ 	} else if (memory->unl.type == GBA_UNL_CART_VFAME) { \
+ 		value = GBAVFameGetPatternValue(address, 32); \
+ 	} else { \
+@@ -591,6 +611,9 @@ uint32_t GBALoad16(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
+ 		wait = memory->waitstatesNonseq16[address >> BASE_OFFSET];
+ 		if ((address & (GBA_SIZE_ROM0 - 2)) < memory->romSize) {
+ 			LOAD_16(value, address & (GBA_SIZE_ROM0 - 2), memory->rom);
++			if (UNLIKELY(IS_GPIO_AREA(address & (GBA_SIZE_ROM0 - 2)))) {
++				value = _gpioLoad16(memory, address & (GBA_SIZE_ROM0 - 2), value);
++			}
+ 		} else if (memory->unl.type == GBA_UNL_CART_VFAME) {
+ 			value = GBAVFameGetPatternValue(address, 16);
+ 		} else if ((address & (GBA_SIZE_ROM0 - 2)) >= AGB_PRINT_BASE) {
+@@ -707,6 +730,11 @@ uint32_t GBALoad8(struct ARMCore* cpu, uint32_t address, int* cycleCounter) {
+ 		wait = memory->waitstatesNonseq16[address >> BASE_OFFSET];
+ 		if ((address & (GBA_SIZE_ROM0 - 1)) < memory->romSize) {
+ 			value = ((uint8_t*) memory->rom)[address & (GBA_SIZE_ROM0 - 1)];
++			if (UNLIKELY(IS_GPIO_AREA(address & (GBA_SIZE_ROM0 - 1)))) {
++				uint16_t half;
++				LOAD_16(half, address & (GBA_SIZE_ROM0 - 2), memory->rom);
++				value = _gpioLoad16(memory, address & (GBA_SIZE_ROM0 - 2), half) >> ((address & 1) * 8) & 0xFF;
++			}
+ 		} else if (memory->unl.type == GBA_UNL_CART_VFAME) {
+ 			value = GBAVFameGetPatternValue(address, 8);
+ 		} else {
+@@ -949,22 +977,9 @@ void GBAStore16(struct ARMCore* cpu, uint32_t address, int16_t value, int* cycle
+ 				memory->agbPrintProtect = value;
+ 
+ 				if (!memory->agbPrintBuffer) {
++					// ps3gba: AGB print never maps into a ROM it overlaps (16 MB and up): that
++					// copied the ROM (32 MB per player). Such a ROM reads as on a retail cart.
+ 					memory->agbPrintBuffer = anonymousMemoryMap(GBA_SIZE_AGB_PRINT);
+-					if (memory->romSize >= GBA_SIZE_ROM0 / 2) {
+-						int base = 0;
+-						if (memory->romSize == GBA_SIZE_ROM0) {
+-							base = address & 0x01000000;
+-						}
+-						memory->agbPrintBase = base;
+-						memory->agbPrintBufferBackup = anonymousMemoryMap(GBA_SIZE_AGB_PRINT);
+-						memcpy(memory->agbPrintBufferBackup, &memory->rom[(AGB_PRINT_TOP | base) >> 2], GBA_SIZE_AGB_PRINT);
+-						LOAD_16(memory->agbPrintProtectBackup, AGB_PRINT_PROTECT | base, memory->rom);
+-						LOAD_16(memory->agbPrintCtxBackup.request, AGB_PRINT_STRUCT | base, memory->rom);
+-						LOAD_16(memory->agbPrintCtxBackup.bank, (AGB_PRINT_STRUCT | base) + 2, memory->rom);
+-						LOAD_16(memory->agbPrintCtxBackup.get, (AGB_PRINT_STRUCT | base) + 4, memory->rom);
+-						LOAD_16(memory->agbPrintCtxBackup.put, (AGB_PRINT_STRUCT | base) + 6, memory->rom);
+-						LOAD_32(memory->agbPrintFuncBackup, AGB_PRINT_FLUSH_ADDR | base, memory->rom);
+-					}
+ 				}
+ 
+ 				if (value == 0x20) {
+@@ -1948,13 +1963,6 @@ static void _agbPrintStore(struct GBA* gba, uint32_t address, int16_t value) {
+ 	} else if ((address & 0x00FFFFF8) == AGB_PRINT_STRUCT) {
+ 		(&memory->agbPrintCtx.request)[(address & 7) >> 1] = value;
+ 	}
+-	if (memory->romSize == GBA_SIZE_ROM0) {
+-		_pristineCow(gba);
+-		STORE_16(value, address & (GBA_SIZE_ROM0 - 2), memory->rom);
+-	} else if (memory->agbPrintCtx.bank == 0xFD && memory->romSize >= GBA_SIZE_ROM0 / 2) {
+-		_pristineCow(gba);
+-		STORE_16(value, address & (GBA_SIZE_ROM0 / 2 - 2), memory->rom);
+-	}
+ }
+ 
+ static int16_t _agbPrintLoad(struct GBA* gba, uint32_t address) {

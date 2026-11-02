@@ -1,0 +1,19 @@
+.DS_Store
+*.gba
+*.sav
+build/
+*.self
+*.elf
+*.pkg
+mgba-build/
+# ROMs and the user's local test files: never commit
+roms/
+*.gb
+*.gbc
+.DS_Store
+# Local only: agent worktrees, personal notes and settings, built packages
+.claude/
+CLAUDE.md
+CLAUDE.local.md
+.env
+dist/

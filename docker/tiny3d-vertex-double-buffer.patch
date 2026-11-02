@@ -1,0 +1,33 @@
+diff --git a/lib/source/tiny3d.c b/lib/source/tiny3d.c
+index 4b94641..e433b05 100644
+--- a/lib/source/tiny3d.c
++++ b/lib/source/tiny3d.c
+@@ -80,6 +80,7 @@ static u8 *rsx_vertex = NULL;           // vertex memory
+ static int size_rsx_vertex = 1024*1024; // size of vertex memory
+ 
+ static int pos_rsx_vertex = 0;          // offset to vertex memory
++static int vertex_half = 0;             // ps3gba: half of the vertex memory used this frame
+ 
+ static int polygon = -1;
+ 
+@@ -653,7 +654,7 @@ static void put_vertex()
+ 
+     float *f_address_v = NULL;
+     u32 *u_address_v = NULL;
+-    if(pos_rsx_vertex > (size_rsx_vertex - 1024)) {tiny_3d_alarm = 1;flag_vertex =(flag_vertex & ~VERTEX_SETPOS) | VERTEX_LOCK; return;}
++    if(pos_rsx_vertex > ((vertex_half ? size_rsx_vertex : size_rsx_vertex / 2) - 1024)) {tiny_3d_alarm = 1;flag_vertex =(flag_vertex & ~VERTEX_SETPOS) | VERTEX_LOCK; return;}
+ 
+     if(flag_vertex & VERTEX_SETPOS) {
+ 
+@@ -1116,7 +1117,10 @@ void tiny3d_Flip()
+ 
+     set_shader_context(-1);
+ 
+-    pos_rsx_vertex = 0;
++    // ps3gba: alternate halves so the CPU never overwrites vertices the RSX may still be
++    // reading for the frame it is drawing (seen as garbage triangles when GPU-bound).
++    vertex_half ^= 1;
++    pos_rsx_vertex = vertex_half ? size_rsx_vertex / 2 : 0;
+     current_shader = -1;
+     polygon = -1;
+     off_head_vertex = off_start_vertex = 0;

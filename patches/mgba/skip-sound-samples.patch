@@ -1,0 +1,284 @@
+diff --git a/include/mgba/internal/gb/audio.h b/include/mgba/internal/gb/audio.h
+index 8b9b775c3..b6dd78ce1 100644
+--- a/include/mgba/internal/gb/audio.h
++++ b/include/mgba/internal/gb/audio.h
+@@ -190,6 +190,7 @@ struct GBAudio {
+ 
+ 	int frame;
+ 	bool skipFrame;
++	bool skipSamples; // see GBAudioSkipSamples
+ 
+ 	int32_t sampleInterval;
+ 	enum GBAudioStyle style;
+@@ -210,6 +211,7 @@ struct GBAudio {
+ void GBAudioInit(struct GBAudio* audio, size_t samples, uint8_t* nr52, enum GBAudioStyle style);
+ void GBAudioDeinit(struct GBAudio* audio);
+ void GBAudioReset(struct GBAudio* audio);
++void GBAudioSkipSamples(struct GBAudio* audio, bool skip);
+ 
+ void GBAudioResizeBuffer(struct GBAudio* audio, size_t samples);
+ 
+diff --git a/include/mgba/internal/gba/audio.h b/include/mgba/internal/gba/audio.h
+index fba5090bf..0586d1909 100644
+--- a/include/mgba/internal/gba/audio.h
++++ b/include/mgba/internal/gba/audio.h
+@@ -85,6 +85,7 @@ struct GBAAudio {
+ 
+ 	bool forceDisableChA;
+ 	bool forceDisableChB;
++	bool skipSamples; // see GBAAudioSkipSamples
+ 	int masterVolume;
+ 
+ 	struct mTimingEvent sampleEvent;
+@@ -281,6 +282,7 @@ uint32_t GBAAudioWriteFIFO(struct GBAAudio* audio, int address, uint32_t value);
+ void GBAAudioSampleFIFO(struct GBAAudio* audio, int fifoId, int32_t cycles);
+ 
+ void GBAAudioSample(struct GBAAudio* audio, int32_t timestamp);
++void GBAAudioSkipSamples(struct GBAAudio* audio, bool skip);
+ 
+ struct GBASerializedState;
+ void GBAAudioSerialize(const struct GBAAudio* audio, struct GBASerializedState* state);
+diff --git a/src/gb/audio.c b/src/gb/audio.c
+index 6a97d8bea..35c10cab7 100644
+--- a/src/gb/audio.c
++++ b/src/gb/audio.c
+@@ -43,6 +43,8 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate);
+ #endif
+ 
+ static void GBAudioSample(struct GBAudio* audio, int32_t timestamp);
++static void _sampleTo(struct GBAudio* audio, int32_t timestamp);
++static void _replaySamples(struct GBAudio* audio, int32_t timestamp);
+ 
+ static const int _squareChannelDuty[4][8] = {
+ 	{ 0, 0, 0, 0, 0, 0, 0, 1 },
+@@ -59,6 +61,7 @@ void GBAudioInit(struct GBAudio* audio, size_t samples, uint8_t* nr52, enum GBAu
+ 	audio->forceDisableCh[2] = false;
+ 	audio->forceDisableCh[3] = false;
+ 	audio->masterVolume = GB_AUDIO_VOLUME_MAX;
++	audio->skipSamples = false;
+ 	audio->nr52 = nr52;
+ 	audio->style = style;
+ 	if (style == GB_AUDIO_GBA) {
+@@ -89,6 +92,7 @@ void GBAudioReset(struct GBAudio* audio) {
+ 		mTimingSchedule(audio->timing, &audio->sampleEvent, 0);
+ 	}
+ #endif
++	audio->skipSamples = false;
+ 	audio->ch1 = (struct GBAudioSquareChannel) { .sweep = { .time = 8 }, .envelope = { .dead = 2 } };
+ 	audio->ch2 = (struct GBAudioSquareChannel) { .envelope = { .dead = 2 } };
+ 	audio->ch3 = (struct GBAudioWaveChannel) { .bank = 0 };
+@@ -405,6 +409,7 @@ void GBAudioWriteNR51(struct GBAudio* audio, uint8_t value) {
+ }
+ 
+ void GBAudioWriteNR52(struct GBAudio* audio, uint8_t value) {
++	_replaySamples(audio, mTimingCurrentTime(audio->timing)); // before the PSG stops or starts
+ 	bool wasEnable = audio->enable;
+ 	audio->enable = GBAudioEnableGetEnable(value);
+ 	if (!audio->enable) {
+@@ -794,6 +799,11 @@ void GBAudioSamplePSG(struct GBAudio* audio, int16_t* left, int16_t* right) {
+ }
+ 
+ void GBAudioSample(struct GBAudio* audio, int32_t timestamp) {
++	_replaySamples(audio, timestamp);
++	_sampleTo(audio, timestamp);
++}
++
++static void _sampleTo(struct GBAudio* audio, int32_t timestamp) {
+ 	int interval = SAMPLE_INTERVAL * audio->timingFactor;
+ 	timestamp -= audio->lastSample;
+ 	timestamp -= audio->sampleIndex * interval;
+@@ -853,6 +863,40 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
+ }
+ #endif
+ 
++// While samples are skipped (GBAudioSkipSamples), the sample events due by `timestamp` run here,
++// in order and at their own times but without output, before anything reads or changes the
++// state they touch (every PSG access runs GBAudioRun, which samples first, or is NR52 above).
++// A real event samples up to when it is processed, a replayed one up to its own time: the same,
++// since either way the window ends at that event and sampling stops at a window's end.
++static void _replaySamples(struct GBAudio* audio, int32_t timestamp) {
++	while (audio->skipSamples && (int32_t) (timestamp - audio->sampleEvent.when) >= 0) {
++		int32_t when = audio->sampleEvent.when;
++		audio->sampleEvent.when += audio->sampleInterval * audio->timingFactor;
++		_sampleTo(audio, when);
++	}
++}
++
++// For a core nobody listens to: stops producing samples without changing anything the game can
++// observe. Turning it back on resumes exactly where an always-sampling core would be. Call it
++// again now and then while skipping (e.g. every frame): it runs the skipped samples due by then,
++// so they never pile up (with its sound off a game never reaches the PSG code that replays them).
++void GBAudioSkipSamples(struct GBAudio* audio, bool skip) {
++	if (audio->style == GB_AUDIO_GBA) {
++		return;
++	}
++	if (skip == audio->skipSamples) {
++		_replaySamples(audio, mTimingCurrentTime(audio->timing));
++		return;
++	}
++	if (skip) {
++		mTimingDeschedule(audio->timing, &audio->sampleEvent); // its `when` stays the next sample's time
++	} else {
++		_replaySamples(audio, mTimingCurrentTime(audio->timing));
++		mTimingScheduleAbsolute(audio->timing, &audio->sampleEvent, audio->sampleEvent.when);
++	}
++	audio->skipSamples = skip;
++}
++
+ bool _resetEnvelope(struct GBAudioEnvelope* envelope, enum GBAudioStyle style) {
+ 	envelope->currentVolume = envelope->initialVolume;
+ 	envelope->nextStep = envelope->stepTime;
+@@ -1154,4 +1198,5 @@ void GBAudioDeserialize(struct GBAudio* audio, const struct GBSerializedState* s
+ 	uint32_t when;
+ 	LOAD_32LE(when, 0, &state->audio.nextSample);
+ 	mTimingSchedule(audio->timing, &audio->sampleEvent, when);
++	audio->skipSamples = false;
+ }
+diff --git a/src/gba/audio.c b/src/gba/audio.c
+index 278e87832..21cab4e07 100644
+--- a/src/gba/audio.c
++++ b/src/gba/audio.c
+@@ -24,6 +24,9 @@ static const int SAMPLE_INTERVAL = GBA_ARM7TDMI_FREQUENCY / 0x4000;
+ 
+ static int _applyBias(struct GBAAudio* audio, int sample);
+ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate);
++static void _sampleTo(struct GBAAudio* audio, int32_t timestamp);
++static void _sampleState(struct GBAAudio* audio, int32_t timestamp);
++static void _replaySamples(struct GBAAudio* audio, int32_t timestamp);
+ 
+ void GBAAudioInit(struct GBAAudio* audio, size_t samples) {
+ 	audio->sampleEvent.context = audio;
+@@ -42,6 +45,7 @@ void GBAAudioInit(struct GBAAudio* audio, size_t samples) {
+ 
+ 	audio->forceDisableChA = false;
+ 	audio->forceDisableChB = false;
++	audio->skipSamples = false;
+ 	audio->masterVolume = GBA_AUDIO_VOLUME_MAX;
+ 	audio->sampleInterval = GBA_ARM7TDMI_FREQUENCY / 0x8000;
+ }
+@@ -52,6 +56,7 @@ void GBAAudioReset(struct GBAAudio* audio) {
+ 	mTimingSchedule(&audio->p->timing, &audio->psg.frameEvent, 0);
+ 	mTimingDeschedule(&audio->p->timing, &audio->sampleEvent);
+ 	mTimingSchedule(&audio->p->timing, &audio->sampleEvent, 0);
++	audio->skipSamples = false;
+ 	audio->chA.dmaSource = 1;
+ 	audio->chB.dmaSource = 2;
+ 	audio->chA.fifoWrite = 0;
+@@ -194,6 +199,7 @@ void GBAAudioWriteSOUNDCNT_LO(struct GBAAudio* audio, uint16_t value) {
+ }
+ 
+ void GBAAudioWriteSOUNDCNT_HI(struct GBAAudio* audio, uint16_t value) {
++	_replaySamples(audio, mTimingCurrentTime(&audio->p->timing));
+ 	audio->volume = GBARegisterSOUNDCNT_HIGetVolume(value);
+ 	audio->volumeChA = GBARegisterSOUNDCNT_HIGetVolumeChA(value);
+ 	audio->volumeChB = GBARegisterSOUNDCNT_HIGetVolumeChB(value);
+@@ -259,6 +265,7 @@ void GBAAudioWriteWaveRAM(struct GBAAudio* audio, int address, uint32_t value) {
+ 		bank = 1;
+ 	}
+ 
++	_replaySamples(audio, mTimingCurrentTime(audio->psg.timing));
+ 	GBAudioRun(&audio->psg, mTimingCurrentTime(audio->psg.timing), 0x4);
+ 	audio->psg.ch3.wavedata32[address | (bank * 4)] = value;
+ }
+@@ -272,6 +279,7 @@ uint32_t GBAAudioReadWaveRAM(struct GBAAudio* audio, int address) {
+ 		bank = 1;
+ 	}
+ 
++	_replaySamples(audio, mTimingCurrentTime(audio->psg.timing));
+ 	GBAudioRun(&audio->psg, mTimingCurrentTime(audio->psg.timing), 0x4);
+ 	return audio->psg.ch3.wavedata32[address | (bank * 4)];
+ }
+@@ -298,6 +306,8 @@ uint32_t GBAAudioWriteFIFO(struct GBAAudio* audio, int address, uint32_t value)
+ }
+ 
+ void GBAAudioSampleFIFO(struct GBAAudio* audio, int fifoId, int32_t cycles) {
++	// The samples due before this timer event (lower priority value at the same time)
++	_replaySamples(audio, mTimingCurrentTime(&audio->p->timing) - cycles);
+ 	struct GBAAudioFIFO* channel;
+ 	if (fifoId == 0) {
+ 		channel = &audio->chA;
+@@ -359,6 +369,11 @@ static int _applyBias(struct GBAAudio* audio, int sample) {
+ }
+ 
+ void GBAAudioSample(struct GBAAudio* audio, int32_t timestamp) {
++	_replaySamples(audio, timestamp);
++	_sampleTo(audio, timestamp);
++}
++
++static void _sampleTo(struct GBAAudio* audio, int32_t timestamp) {
+ 	timestamp -= audio->lastSample;
+ 	timestamp -= audio->sampleIndex * audio->sampleInterval; // TODO: This can break if the interval changes between samples
+ 
+@@ -406,13 +421,54 @@ void GBAAudioSample(struct GBAAudio* audio, int32_t timestamp) {
+ 	}
+ }
+ 
++// What a sample event does to the emulation state, output aside
++static void _sampleState(struct GBAAudio* audio, int32_t timestamp) {
++	_sampleTo(audio, timestamp);
++	int samples = 2 << GBARegisterSOUNDBIASGetResolution(audio->soundbias);
++	memset(audio->chA.samples, audio->chA.samples[samples - 1], sizeof(audio->chA.samples));
++	memset(audio->chB.samples, audio->chB.samples[samples - 1], sizeof(audio->chB.samples));
++}
++
++// While samples are skipped (GBAAudioSkipSamples), the sample events due by `timestamp` run
++// here, in order and at their own times but without output, before anything reads or changes
++// the state they touch. That state then evolves exactly as if they had run on schedule.
++static void _replaySamples(struct GBAAudio* audio, int32_t timestamp) {
++	while (audio->skipSamples && (int32_t) (timestamp - audio->sampleEvent.when) >= 0) {
++		int32_t when = audio->sampleEvent.when;
++		audio->sampleEvent.when += SAMPLE_INTERVAL;
++		_sampleState(audio, when);
++	}
++}
++
++// For a core nobody listens to: stops producing samples (no sample events, so the CPU also runs
++// longer between events) without changing anything the game can observe. Turning it back on
++// resumes exactly where an always-sampling core would be. Call it again now and then while
++// skipping (e.g. every frame): it runs the skipped samples due by then, so they never pile up.
++void GBAAudioSkipSamples(struct GBAAudio* audio, bool skip) {
++	struct mTiming* timing = &audio->p->timing;
++	if (skip == audio->skipSamples) {
++		_replaySamples(audio, mTimingCurrentTime(timing));
++		return;
++	}
++	if (skip) {
++		mTimingDeschedule(timing, &audio->sampleEvent); // its `when` stays the next sample's time
++	} else {
++		_replaySamples(audio, mTimingCurrentTime(timing));
++		mTimingScheduleAbsolute(timing, &audio->sampleEvent, audio->sampleEvent.when);
++	}
++	audio->skipSamples = skip;
++}
++
+ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
++	UNUSED(cyclesLate);
+ 	struct GBAAudio* audio = user;
+-	GBAAudioSample(audio, mTimingCurrentTime(&audio->p->timing) - cyclesLate);
++	// On the sample clock, its own scheduled time: "now - cyclesLate" is off by the cycles an
++	// earlier event of the same tick added to the CPU (an IRQ entry), and rescheduling from there
++	// shifted the clock for good. Replayed samples could not follow such shifts.
++	int32_t when = audio->sampleEvent.when;
++	_sampleState(audio, when);
+ 
+ 	int samples = 2 << GBARegisterSOUNDBIASGetResolution(audio->soundbias);
+-	memset(audio->chA.samples, audio->chA.samples[samples - 1], sizeof(audio->chA.samples));
+-	memset(audio->chB.samples, audio->chB.samples[samples - 1], sizeof(audio->chB.samples));
+ 
+ 	mCoreSyncLockAudio(audio->p->sync);
+ 	mAudioBufferWrite(&audio->psg.buffer, (int16_t*) audio->currentSamples, samples);
+@@ -435,7 +491,7 @@ static void _sample(struct mTiming* timing, void* user, uint32_t cyclesLate) {
+ 		// Interrupted
+ 		GBAInterrupt(audio->p);
+ 	}
+-	mTimingSchedule(timing, &audio->sampleEvent, SAMPLE_INTERVAL - cyclesLate);
++	mTimingScheduleAbsolute(timing, &audio->sampleEvent, when + SAMPLE_INTERVAL);
+ }
+ 
+ void GBAAudioSerialize(const struct GBAAudio* audio, struct GBASerializedState* state) {
+@@ -561,4 +617,5 @@ void GBAAudioDeserialize(struct GBAAudio* audio, const struct GBASerializedState
+ 		audio->lastSample = when - SAMPLE_INTERVAL;
+ 	}
+ 	mTimingSchedule(&audio->p->timing, &audio->sampleEvent, when);
++	audio->skipSamples = false;
+ }

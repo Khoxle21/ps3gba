@@ -1,0 +1,33 @@
+mGBA's proxy renderer (behind the SPU renderer) returned BLDCNT, BLDALPHA, BLDY, WININ and
+WINOUT unmasked, so mGBA stored bits into io[] that its software renderer, and the hardware,
+drop (BLDY also clamps to 16). Games could read the readable ones back, and the JIT self-check,
+whose reference core uses the software renderer, saw Unbound write BLDY = 0x01xx. Same masks as
+video-software.c.
+
+diff --git a/src/gba/extra/proxy.c b/src/gba/extra/proxy.c
+index e15e48e9b..7a22b46be 100644
+--- a/src/gba/extra/proxy.c
++++ b/src/gba/extra/proxy.c
+@@ -286,6 +286,22 @@ uint16_t GBAVideoProxyRendererWriteVideoRegister(struct GBAVideoRenderer* render
+ 	case GBA_REG_BG3VOFS:
+ 		value &= 0x01FF;
+ 		break;
++	case GBA_REG_BLDCNT:
++		value &= 0x3FFF;
++		break;
++	case GBA_REG_BLDALPHA:
++		value &= 0x1F1F;
++		break;
++	case GBA_REG_BLDY:
++		value &= 0x1F;
++		if (value > 0x10) {
++			value = 0x10;
++		}
++		break;
++	case GBA_REG_WININ:
++	case GBA_REG_WINOUT:
++		value &= 0x3F3F;
++		break;
+ 	}
+ 	if (address >= GBA_REG_SOUND1CNT_LO) {
+ 		return value;

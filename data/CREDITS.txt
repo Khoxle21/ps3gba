@@ -1,0 +1,11 @@
+Third-party assets embedded in the app
+
+music.ogg - menu music
+  "Chill Overworld" by ATMANAN
+  https://opengameart.org/content/chill-overworld
+  License: CC-BY 4.0 (https://creativecommons.org/licenses/by/4.0/)
+  Changes: cut to its 40-bar loop (120 bpm, 80 s) with the release after the last bar folded
+  onto the start so it loops seamlessly, resampled to 48 kHz and encoded as Ogg Vorbis (q4).
+
+pressstart2p.ttf - UI font
+  "Press Start 2P" by The Press Start 2P Project Authors, SIL Open Font License 1.1 (see OFL.txt)

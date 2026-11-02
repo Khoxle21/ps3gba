@@ -1,0 +1,268 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="theme-color" content="#1d1546">
+<title>ps3gba</title>
+<style>
+@font-face { font-family: P; src: url(font.ttf); }
+:root { --p: #4aa8ff; --text: #f2eeff; --dim: #9a92c8; --panel: #171233; --edge: #06040f; --drop: #00000080; }
+* { box-sizing: border-box; }
+html { background: #0b0920; }
+body { margin: 0 auto; max-width: 560px; min-height: 100vh; padding: 16px 16px 120px; color: var(--text);
+	font: 11px/1.8 P, monospace; -webkit-text-size-adjust: 100%; }
+h1, h2 { font-size: 11px; font-weight: normal; margin: 0 0 12px; }
+h1 { font-size: 14px; text-shadow: 3px 3px 0 var(--edge); }
+h2 { color: var(--p); }
+header { display: flex; align-items: center; gap: 16px; margin: 8px 0 20px; }
+#tab { background: var(--p); color: var(--edge); border: 4px solid var(--edge); box-shadow: 4px 4px 0 var(--drop);
+	padding: 6px 10px; font-size: 14px; }
+.box { background: var(--panel); border: 4px solid var(--edge); box-shadow: 4px 4px 0 var(--drop); padding: 14px; margin-bottom: 20px; }
+.btn { display: inline-block; background: var(--p); color: var(--edge); border: 4px solid var(--edge);
+	box-shadow: 4px 4px 0 var(--drop); padding: 10px 12px; font: inherit; text-decoration: none; cursor: pointer;
+	-webkit-tap-highlight-color: transparent; user-select: none; }
+.btn:active { transform: translate(4px, 4px); box-shadow: none; }
+.btn:focus-within, .btn:focus-visible { outline: 3px solid var(--text); }
+.btn.small { padding: 4px 8px; }
+.vh { position: absolute; width: 1px; height: 1px; opacity: 0; overflow: hidden; }
+form { display: flex; gap: 12px; }
+input[type=text] { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--text); background: var(--edge);
+	border: 4px solid var(--dim); padding: 6px 8px; border-radius: 0; }
+input[type=text]:focus { outline: none; border-color: var(--p); }
+.hint { color: var(--dim); margin: 12px 0 0; }
+details { border-top: 4px solid var(--edge); }
+details:first-child { border-top: 0; }
+summary { display: flex; align-items: center; gap: 12px; padding: 10px 0; cursor: pointer; list-style: none; }
+summary::-webkit-details-marker { display: none; }
+summary::before { content: ">"; color: var(--p); }
+details[open] summary::before { content: "v"; }
+summary img { width: 40px; height: 40px; object-fit: contain; }
+summary img.none { visibility: hidden; }
+.saves { margin: 0 0 12px 24px; color: var(--dim); }
+.save { display: flex; align-items: center; gap: 12px; padding: 6px 0; color: var(--text); }
+.save .n { flex: 1; overflow-wrap: anywhere; }
+.save .t { color: var(--dim); }
+.row { display: flex; flex-wrap: wrap; gap: 12px; margin: 0 0 16px 24px; }
+#status { position: fixed; left: 0; right: 0; bottom: 0; background: var(--panel); border-top: 4px solid var(--edge);
+	padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+#msg { max-width: 528px; margin: 0 auto 8px; overflow-wrap: anywhere; }
+#status.ok #msg { color: #7ae08a; }
+#status.err #msg { color: #ff7a7a; }
+#bar { max-width: 528px; margin: 0 auto; height: 12px; background: var(--edge); }
+#fill { height: 100%; width: 0; background: var(--p); }
+</style>
+</head>
+<body>
+<header><span id="tab">P1</span><h1>ps3gba</h1></header>
+
+<section class="box">
+	<h2>YOUR NAME</h2>
+	<form id="nameform"><input type="text" id="name" maxlength="12" autocomplete="off" aria-label="Your name"><button class="btn">SET</button></form>
+</section>
+
+<section class="box">
+	<h2>ADD GAMES</h2>
+	<label class="btn">CHOOSE .GBA .GB .GBC FILES<input type="file" id="rom" class="vh" multiple></label>
+	<p class="hint">THEY SHOW UP ON THE TV RIGHT AWAY.</p>
+</section>
+
+<section class="box">
+	<h2>GAMES</h2>
+	<div id="games">LOADING...</div>
+</section>
+
+<div id="status" role="status"><div id="msg">READY</div><div id="bar"><div id="fill"></div></div></div>
+
+<script>
+"use strict";
+const $ = s => document.querySelector(s);
+const COLORS = ["#4aa8ff", "#ff5a6e", "#4ad66d", "#ffcf3f"]; // ui.c player_colors
+
+// The TV's sky: hard bands instead of a smooth ramp.
+// Not `top`: that's window.top, and redeclaring it stops the whole script (no handler runs).
+const skyTop = [0x1d, 0x15, 0x46], skyBottom = [0x0b, 0x09, 0x20], bands = [];
+for (let i = 0; i < 12; i++) {
+	const c = skyTop.map((v, k) => Math.round(v + (skyBottom[k] - v) * i / 11)).join();
+	bands.push(`rgb(${c}) ${i * 100 / 12}% ${(i + 1) * 100 / 12}%`);
+}
+document.body.style.background = `linear-gradient(${bands.join()}) fixed`;
+
+// "Pokemon - Fire Red (USA)" -> "Pokemon - Fire Red", like the TV.
+const title = f => (f = f.replace(/\.gbc?$/i, "")).includes(" (") ? f.slice(0, f.indexOf(" (")) : f;
+// The server only takes plain ASCII names: drop accents, replace the rest.
+const clean = s => s.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\x20-\x7e]|[\/\\:*?"<>|]/g, "_")
+	.replace(/^[ .]+|[ .]+$/g, "");
+const query = o => Object.entries(o).map(([k, v]) => k + "=" + encodeURIComponent(v)).join("&");
+const ago = s => s < 60 ? "JUST NOW" : s < 3600 ? (s / 60 | 0) + "M AGO" : s < 86400 ? (s / 3600 | 0) + "H AGO" : (s / 86400 | 0) + "D AGO";
+
+function status(msg, kind, fraction) {
+	$("#status").className = kind || "";
+	$("#msg").textContent = msg;
+	$("#fill").style.width = (fraction || 0) * 100 + "%";
+}
+
+// POSTs a file with progress; resolves to [ok, the server's message].
+function send(url, body, what) {
+	return new Promise(done => {
+		const x = new XMLHttpRequest();
+		x.open("POST", url);
+		x.upload.onprogress = e => e.lengthComputable && status(`${what} ${e.loaded * 100 / e.total | 0}%`, "busy", e.loaded / e.total);
+		x.onload = () => {
+			const ok = x.status == 200, msg = x.responseText || "ERROR " + x.status;
+			status(msg, ok ? "ok" : "err", ok ? 1 : 0);
+			done([ok, msg]);
+		};
+		x.onerror = x.ontimeout = () => { status("CONNECTION LOST", "err"); done([false, "CONNECTION LOST"]); };
+		status(what, "busy", 0);
+		x.send(body);
+	});
+}
+
+async function load() {
+	try {
+		const s = await (await fetch("games")).json();
+		document.documentElement.style.setProperty("--p", COLORS[s.player - 1]);
+		$("#tab").textContent = "P" + s.player;
+		if (document.activeElement != $("#name")) $("#name").value = s.name;
+		const list = $("#games");
+		list.textContent = s.games.length ? "" : "NO GAMES YET";
+		s.games.sort((a, b) => title(a).localeCompare(title(b)));
+		for (const f of s.games) list.append(game(f));
+	} catch (e) {
+		status("CANNOT REACH THE PS3", "err");
+	}
+}
+
+function game(file) {
+	const d = document.createElement("details");
+	d.innerHTML = `<summary><img alt=""><span></span></summary><div class="saves">LOADING...</div>
+		<div class="row"><label class="btn">UPLOAD SAVE<input type="file" class="vh"></label>
+		<label class="btn">SET COVER<input type="file" class="vh" accept="image/*"></label></div>`;
+	const img = d.querySelector("img");
+	let looked = false;
+	img.onerror = async () => {
+		img.classList.add("none");
+		if (!looked && (looked = true) && await findCover(file)) img.src = "cover?" + query({ game: file, v: Date.now() });
+	};
+	img.onload = () => img.classList.remove("none");
+	img.src = "cover?" + query({ game: file });
+	d.querySelector("span").textContent = title(file);
+	d.ontoggle = () => d.open && saves(d, file);
+	const [saveInput, coverInput] = d.querySelectorAll("input");
+	saveInput.onchange = async () => {
+		const f = saveInput.files[0];
+		saveInput.value = "";
+		if (!f) return;
+		if (!/\.sav$/i.test(f.name)) return status("ONLY .SAV FILES", "err");
+		const guess = clean(f.name.replace(/\.sav$/i, "")).toUpperCase().slice(0, 16).trim() || "PHONE";
+		const name = prompt("NAME OF THE NEW SAVE (16 LETTERS AT MOST)", guess);
+		if (name === null) return;
+		if ((await send("save?" + query({ game: file, name: clean(name).slice(0, 16).trim() }), f, "UPLOADING SAVE"))[0]) saves(d, file);
+	};
+	coverInput.onchange = () => {
+		const f = coverInput.files[0];
+		coverInput.value = "";
+		if (f) shrink(f).then(async png => {
+			if (png && (await send("cover?" + query({ game: file }), png, "UPLOADING COVER"))[0]) img.src = "cover?" + query({ game: file, v: Date.now() });
+		});
+	};
+	return d;
+}
+
+async function saves(d, file) {
+	const box = d.querySelector(".saves");
+	try {
+		const r = await fetch("saves?" + query({ game: file }));
+		if (!r.ok) return box.textContent = await r.text();
+		const s = await r.json();
+		box.textContent = s.saves.length ? "" : "NO SAVES YET";
+		for (const v of s.saves) {
+			const row = document.createElement("div");
+			row.className = "save";
+			row.innerHTML = `<span class="n"></span><span class="t"></span><a class="btn small">GET</a>`;
+			row.querySelector(".n").textContent = v.name;
+			row.querySelector(".t").textContent = v.player ? "P" + v.player + " PLAYING" : ago(s.now - v.time);
+			const a = row.querySelector("a");
+			a.href = "save?" + query({ game: file, name: v.name });
+			a.download = `${file} - ${v.name}.sav`;
+			box.append(row);
+		}
+	} catch (e) {
+		box.textContent = "CANNOT REACH THE PS3";
+	}
+}
+
+// Every game's cover is requested on load (not lazily), so any without one is looked up.
+// A game without a cover gets its box art from libretro-thumbnails (RetroArch's collection, named
+// like No-Intro ROMs), fetched by the phone: the PS3 needs no internet. Hacks and other names find
+// nothing and keep the TV's fallback (the original game's cover, or a blank cartridge).
+const REPOS = ["Nintendo_-_Game_Boy_Advance", "Nintendo_-_Game_Boy_Color", "Nintendo_-_Game_Boy"];
+async function findCover(file) {
+	const ext = (file.match(/\.gbc?$/i) || [""])[0].toLowerCase();
+	const name = file.slice(0, file.length - ext.length).replace(/[&*\/:`<>?\\|"]/g, "_");
+	const repos = ext == ".gbc" ? [REPOS[1], REPOS[2]] : ext == ".gb" ? [REPOS[2], REPOS[1]] : [REPOS[0]];
+	for (const repo of repos) {
+		try {
+			const r = await fetch(`https://raw.githubusercontent.com/libretro-thumbnails/${repo}/master/Named_Boxarts/${encodeURIComponent(name)}.png`);
+			if (!r.ok) continue;
+			const png = await shrink(await r.blob());
+			return png != null && (await send("cover?" + query({ game: file }), png, "ADDING COVER"))[0];
+		} catch (e) {
+			return false; // no internet on the phone: covers stay as they are
+		}
+	}
+	return false;
+}
+
+// Covers are shown at most 256 px on the TV: send a small PNG, whatever the phone took.
+// Resolves to the PNG blob, or null when the file isn't an image.
+function shrink(file) {
+	return new Promise(done => {
+		const img = new Image();
+		img.onload = () => {
+			const k = Math.min(1, 256 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+			c.width = Math.max(1, Math.round(img.width * k));
+			c.height = Math.max(1, Math.round(img.height * k));
+			const g = c.getContext("2d");
+			g.imageSmoothingQuality = "high";
+			g.drawImage(img, 0, 0, c.width, c.height);
+			URL.revokeObjectURL(img.src);
+			c.toBlob(done, "image/png");
+		};
+		img.onerror = () => { URL.revokeObjectURL(img.src); status("NOT AN IMAGE", "err"); done(null); };
+		img.src = URL.createObjectURL(file);
+	});
+}
+
+$("#rom").onchange = async () => {
+	const files = [...$("#rom").files], failed = [];
+	$("#rom").value = "";
+	for (const [i, f] of files.entries()) {
+		const what = files.length > 1 ? `GAME ${i + 1}/${files.length}` : "UPLOADING GAME";
+		let result;
+		const ext = (f.name.match(/\.(gba|gbc?)$/i) || [""])[0].toLowerCase();
+		if (!ext) result = [false, "ONLY .GBA .GB .GBC FILES"];
+		else if (f.size > 32 << 20) result = [false, "32 MB AT MOST"];
+		else result = await send("rom?" + query({ name: clean(f.name.slice(0, -ext.length)).slice(0, 128) + ext }), f, what);
+		if (!result[0]) failed.push(`${f.name}: ${result[1]}`);
+	}
+	if (failed.length) status(failed.join(" / "), "err");
+	else if (files.length > 1) status(`ADDED ${files.length} GAMES`, "ok", 1);
+	if (failed.length < files.length) load();
+};
+
+$("#nameform").onsubmit = async e => {
+	e.preventDefault();
+	try {
+		const r = await fetch("name?" + query({ name: clean($("#name").value).slice(0, 12) }), { method: "POST", body: "" });
+		status(await r.text(), r.ok ? "ok" : "err", r.ok ? 1 : 0);
+	} catch (e) {
+		status("CANNOT REACH THE PS3", "err");
+	}
+};
+
+load();
+</script>
+</body>
+</html>
