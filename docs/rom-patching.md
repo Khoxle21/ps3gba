@@ -32,6 +32,16 @@ patch made for it; the PS3 builds the patched ROM once, which then appears as a 
    `covers/<name>.png` or, through its header code, the base game's (existing fallback).
 7. **Errors** say what to do: unknown or damaged patch, wrong base version (UPS/BPS checksum),
    result checksum mismatch, not enough memory, drive full, a game of that name already exists.
+8. **Cleaning up** (patches are big: a hack's UPS can weigh 26 MB, and a chain leaves its
+   intermediate ROMs behind): after every successful build, before going back to the carousel,
+   ask "<game> is ready. Delete the patch file? You won't be able to rebuild it without it.",
+   KEEP preselected (the safe choice, like NO for deleting a save).
+   - When the base is itself a ROM ps3gba built (a chain: FireRed -> a hack -> its translation),
+     and no one has saves for it, the same screen also offers to delete that intermediate ROM.
+   - Never offered: an original ROM (the player's own dump), nor any game with saves.
+   - ps3gba knows which ROMs it built from a small record in `patches/` (one line per build:
+     output, base, patch, checksums), written with the ROM and updated on deletion.
+   - Deleting runs on the library's worker thread like a save deletion, then the list refreshes.
 
 Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't change bytes past
 16 MB (24-bit offsets: a format limit, relevant for 32 MB ROMs).
@@ -66,7 +76,9 @@ Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't cha
   `tools/mgba_exact.sh`. Nothing copyrighted involved, so it can live in the repo.
 - **With real files** (kept out of the repo): a ROM and a BPS hack or translation patch for it,
   in RPCS3 then on the console: list, wrong-version refusal, build, play, save, rescan; the
-  "nobody playing" refusal with a game running; a phone upload of a patch.
+  "nobody playing" refusal with a game running; a phone upload of a patch; the cleanup question
+  (KEEP leaves everything, DELETE removes the patch, and in a chain the intermediate ROM without
+  saves, never the original ROM).
 - **A chain**: a hack built from a ROM by a UPS patch, then a translation BPS made for that hack:
   the translation must show up on the newly built game (its checksum is the hack's result
   checksum), not on the original ROM. Large outputs too: a 16 MB ROM patched into 32 MB.
