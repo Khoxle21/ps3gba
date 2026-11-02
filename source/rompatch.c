@@ -331,6 +331,8 @@ struct build {
 	u8* out;
 	size_t patch_size, rom_size, out_size;
 	struct VFile* vf;
+	s64 start, read, applied, written; // dev log: when it started and each step ended
+	s64 free_mb;                       // dev log: the drive's free space, -1 if unknown
 };
 
 static bool fail(struct patch_result* r, const char* error) {
@@ -376,6 +378,7 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 	if (b->out_size > ROM_MAX) {
 		return fail(r, "THE NEW GAME WOULD BE OVER 32 MB.");
 	}
+	b->read = sysGetSystemTime();
 	job_step = STEP_PATCHING;
 	// Zeroed: UPS leaves the bytes past the base's end to the caller.
 	if (!(b->out = calloc(1, b->out_size))) {
@@ -386,9 +389,11 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 		return fail(r, "THE RESULT IS WRONG: THE PATCH OR THE GAME FILE IS DAMAGED.");
 	}
 	u32 crc = checked ? le32(b->patch + b->patch_size - 8) : doCrc32(b->out, b->out_size);
+	b->applied = sysGetSystemTime();
 	job_step = STEP_WRITING;
 	u64 total, avail;
-	if (disk_free("/dev_hdd0", &total, &avail) == 0 && avail < b->out_size + (1 << 20)) {
+	b->free_mb = disk_free("/dev_hdd0", &total, &avail) == 0 ? (s64) (avail >> 20) : -1;
+	if (b->free_mb >= 0 && avail < b->out_size + (1 << 20)) {
 		snprintf(error, sizeof(error), "NOT ENOUGH SPACE ON THE PS3'S DRIVE: %u MB NEEDED.", (unsigned) (b->out_size >> 20) + 1);
 		return fail(r, error);
 	}
@@ -413,6 +418,7 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 		snprintf(error, sizeof(error), "%.80s IS ALREADY A GAME. RENAME THE PATCH FILE TO MAKE ANOTHER ONE.", r->game);
 		return fail(r, error);
 	}
+	b->written = sysGetSystemTime();
 	record_add(r->game, game, patch_file, base_crc, crc);
 	remember_crc(r->game, crc);
 	if (record_has(game, base_crc) && !has_saves(game)) {
@@ -422,8 +428,7 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 }
 
 static void build(const char* game, const char* patch_file, struct patch_result* r) {
-	s64 start = sysGetSystemTime();
-	struct build b = { 0 };
+	struct build b = { .start = sysGetSystemTime(), .free_mb = -1 };
 	r->ok = build_rom(game, patch_file, &b, r);
 	if (b.vf) {
 		b.vf->close(b.vf);
@@ -434,8 +439,12 @@ static void build(const char* game, const char* patch_file, struct patch_result*
 	if (r->ok) {
 		library_rescan(NULL); // the new game appears, its cover by its header code
 	}
-	log_printf("patch: %s + %s -> %s %s%s (%u KB, %.1f s)\n", game, patch_file, r->game, r->ok ? "done" : "failed: ",
-	           r->ok ? "" : r->error, (unsigned) (b.out_size >> 10), (sysGetSystemTime() - start) / 1e6);
+	log_printf("patch: %s + %s -> %s %s%s (%u KB, %.2f s)\n", game, patch_file, r->game, r->ok ? "done" : "failed: ",
+	           r->ok ? "" : r->error, (unsigned) (b.out_size >> 10), (sysGetSystemTime() - b.start) / 1e6);
+	if (r->ok) {
+		log_printf("patch: read %.2f s, applied %.2f s, written %.2f s, drive %lld MB free\n", (b.read - b.start) / 1e6,
+		           (b.applied - b.read) / 1e6, (b.written - b.applied) / 1e6, (long long) b.free_mb);
+	}
 }
 
 static void clean(const char* patch_file, const char* base, struct patch_result* r) {
