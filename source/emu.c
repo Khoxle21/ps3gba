@@ -28,6 +28,7 @@
 #include <mgba-util/vfs.h>
 
 #include "audio.h"
+#include "rfu.h"
 #include "emu.h"
 #include "jit/jit.h"
 
@@ -62,6 +63,8 @@ static void unlock(void) {
 
 static void link_plug(struct player* p, struct mCore* core);
 static void link_unplug(struct player* p);
+static void rfu_plug(struct player* p, struct mCore* core);
+static void rfu_unplug(struct player* p);
 
 // ROMs are shared between players running the same game; keyed by file name so the cache
 // survives the library being rescanned (or a game file being removed) mid-session.
@@ -323,7 +326,7 @@ static void player_thread(void* context) {
 	while (core) {
 		u64 w0 = __builtin_ppc_get_timebase();
 		bool linked = p->asleep;
-		while (!p->quit && p->link_wanted == p->link_attached &&
+		while (!p->quit && p->link_wanted == p->link_attached && p->rfu_wanted == p->rfu_attached &&
 		       (p->asleep || p->frames_done >= p->frames_wanted + frame_lead(p))) {
 			sysCondWait(p->wake, 0);
 		}
@@ -333,16 +336,23 @@ static void player_thread(void* context) {
 		if (p->quit) {
 			break;
 		}
-		if (p->link_wanted != p->link_attached) {
+		if (p->link_wanted != p->link_attached || p->rfu_wanted != p->rfu_attached) {
 			// Here, between two slices, our core doesn't run (mGBA's frontend interrupts a core's
 			// thread the same way); asleep or not, mGBA handles it. The other cores keep running:
-			// the cable's mutex orders us with them.
-			bool on = p->link_wanted;
+			// the cable's mutex orders us with them. One port: what goes out goes first.
+			bool link = p->link_wanted, rfu = p->rfu_wanted;
 			unlock();
-			if (on) {
-				link_plug(p, core);
-			} else {
+			if (!link) {
 				link_unplug(p);
+			}
+			if (!rfu) {
+				rfu_unplug(p);
+			}
+			if (link && !p->link_attached) {
+				link_plug(p, core);
+			}
+			if (rfu) {
+				rfu_plug(p, core);
 			}
 			lock();
 			continue;
@@ -444,6 +454,7 @@ static void player_thread(void* context) {
 	}
 	unlock();
 	link_unplug(p); // at once: peers on the cable would wait for this stopped core
+	rfu_unplug(p);  // and its clients or host lose it
 	sysThreadExit(0);
 }
 
@@ -467,6 +478,7 @@ void emu_init(void) {
 	           t.tm_min, t.tm_sec);
 	GBASIOLockstepCoordinatorInit(&link_cables[0]);
 	GBASIOLockstepCoordinatorInit(&link_cables[1]);
+	rfu_init();
 	sys_mutex_attr_t mutex_attr;
 	sysMutexAttrInitialize(mutex_attr);
 	sysMutexCreate(&emu_lock, &mutex_attr);
@@ -749,6 +761,7 @@ static struct mCore* load_game(struct player* p) {
 	p->frame_ready = p->frame_shown = 1;
 	p->asleep = false;
 	p->link_attached = false;
+	p->rfu_attached = false;
 	p->active = false;
 	p->heard = false;
 	p->frames_wanted = p->frames_done = 0;
@@ -764,6 +777,7 @@ static struct mCore* load_game(struct player* p) {
 bool emu_start(struct player* p) {
 	p->quit = false;
 	p->link_wanted = false;
+	p->rfu_wanted = false;
 	p->load_status = LOAD_PENDING;
 	char name[32];
 	snprintf(name, sizeof(name), "emu P%d", p->index + 1);
@@ -856,7 +870,19 @@ void emu_link_set(struct player* p, bool on) {
 	}
 	lock();
 	p->link_wanted = on;
+	p->rfu_wanted &= !on;
 	sysCondBroadcast(p->wake); // its thread plugs or unplugs, even while it has no frame to run
+	unlock();
+}
+
+void emu_wireless_set(struct player* p, bool on) {
+	if (!emu_link_available(p)) {
+		return;
+	}
+	lock();
+	p->rfu_wanted = on;
+	p->link_wanted &= !on;
+	sysCondBroadcast(p->wake);
 	unlock();
 }
 
@@ -899,6 +925,31 @@ static void link_unplug(struct player* p) {
 	unlock();
 }
 
+// On the player's thread while its core doesn't run (see link_plug). The adapter only ever runs
+// on this thread, inside mGBA; its hub has its own lock.
+static void rfu_plug(struct player* p, struct mCore* core) {
+	if (p->rfu_attached) {
+		return;
+	}
+	rfu_create(&p->rfu, p->index);
+	core->setPeripheral(core, mPERIPH_GBA_LINK_PORT, &p->rfu.d);
+	lock();
+	p->rfu_attached = true;
+	unlock();
+	log_printf("rfu: P%d plugged in its Wireless Adapter\n", p->index + 1);
+}
+
+static void rfu_unplug(struct player* p) {
+	if (!p->rfu_attached) {
+		return;
+	}
+	p->core->setPeripheral(p->core, mPERIPH_GBA_LINK_PORT, NULL);
+	lock();
+	p->rfu_attached = false;
+	unlock();
+	log_printf("rfu: P%d unplugged its Wireless Adapter\n", p->index + 1);
+}
+
 static u32 gba_keys(const struct player* p) {
 	if (p->state != PS_PLAYING) {
 		return 0;
@@ -937,8 +988,10 @@ void emu_frame_begin(void) {
 		}
 		p->heard = p == heard;
 		// Linked games run in lockstep (mGBA's hard syncs too, whatever the link mode): the heard
-		// one can only keep its pace if the games on its cable keep theirs.
-		p->favored = p->heard || (heard && heard->link_attached && p->link_attached && cable_of(p) == cable_of(heard));
+		// one can only keep its pace if the games on its cable keep theirs. Wireless games don't
+		// wait for each other, but kept in step their exchanges stay a frame apart at most.
+		p->favored = p->heard || (heard && heard->link_attached && p->link_attached && cable_of(p) == cable_of(heard)) ||
+		             (heard && heard->rfu_attached && p->rfu_attached);
 		p->input = gba_keys(p);
 		++p->frames_wanted;
 		sysCondBroadcast(p->wake);

@@ -794,14 +794,14 @@ static void draw_game(const struct player* p, float x, float y, float w, float h
 }
 
 static void draw_pause(const struct player* p, float x, float y, float w, float h, bool show_perf) {
-	static const char* const labels[PAUSE_COUNT] = { "RESUME", "QUIT GAME", "LINK CABLE: OFF", "PERF: OFF" };
-	bool link = emu_link_available(p); // GB/GBC games have no cable: no entry
-	int rows = PAUSE_COUNT - !link;
+	static const char* const labels[PAUSE_COUNT] = { "RESUME", "QUIT GAME", "LINK CABLE: OFF", "WIRELESS ADAPTER: OFF", "PERF: OFF" };
+	bool link = emu_link_available(p); // GB/GBC games have no link port: no entries
+	int rows = PAUSE_COUNT - 2 * !link;
 	u32 color = player_colors[p->index];
 	float inner = 6 * u, gap = 3 * u, cursor_w = tex_cursor.w * tm;
 	float label_w = 0;
 	for (int i = 0; i < PAUSE_COUNT; ++i) {
-		if (i != PAUSE_LINK || link) label_w = fmaxf(label_w, gfx_text_width(labels[i], tm));
+		if ((i != PAUSE_LINK && i != PAUSE_WIRELESS) || link) label_w = fmaxf(label_w, gfx_text_width(labels[i], tm));
 	}
 	float row_h = 8 * tm + 4 * u;
 	float title_h = 8 * tm + 6 * u;
@@ -813,11 +813,12 @@ static void draw_pause(const struct player* p, float x, float y, float w, float 
 	box(bx, by, bw, bh, COL_PANEL, color);
 	text_centered(bx + bw / 2, by + inner, tm, "PAUSED", color);
 	for (int i = 0, row = 0; i < PAUSE_COUNT; ++i) {
-		if (i == PAUSE_LINK && !link) continue;
+		if ((i == PAUSE_LINK || i == PAUSE_WIRELESS) && !link) continue;
 		float ry = by + inner + title_h + row++ * row_h;
 		char label[24];
 		if (i == PAUSE_PERF) snprintf(label, sizeof(label), "PERF: %s", show_perf ? "ON" : "OFF");
 		else if (i == PAUSE_LINK) snprintf(label, sizeof(label), "LINK CABLE: %s", p->link_wanted ? "ON" : "OFF");
+		else if (i == PAUSE_WIRELESS) snprintf(label, sizeof(label), "WIRELESS ADAPTER: %s", p->rfu_wanted ? "ON" : "OFF");
 		else snprintf(label, sizeof(label), "%s", labels[i]);
 		if (i == p->pause_sel) {
 			sprite(&tex_cursor, bx + inner, ry, tm, color);

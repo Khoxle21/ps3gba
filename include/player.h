@@ -11,6 +11,7 @@
 
 #include "gfx.h"
 #include "library.h"
+#include "rfu.h"
 #include "spu_render.h"
 
 #define MAX_PLAYERS 4
@@ -114,6 +115,9 @@ struct player {
 	struct mLockstepUser link_user;
 	bool link_wanted;   // the pause menu's cable switch (written by the main thread)
 	bool link_attached; // the emulation thread follows link_wanted between two slices
+	struct rfu rfu;     // its Wireless Adapter: on the same port, so never with the cable
+	bool rfu_wanted;    // the pause menu's adapter switch (main thread)
+	bool rfu_attached;  // followed like link_attached
 	bool asleep;
 
 	// Performance readout (microseconds)

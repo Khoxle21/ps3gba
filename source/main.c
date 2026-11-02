@@ -152,7 +152,9 @@ static bool kb_type(char* name, char c) {
 // "WAITGBA <frames>" (frames emulated by player 1: deterministic on slow hosts),
 // "<player> TYPE <text>" (types it on the rename keyboard, as if key by key),
 // "<player> GAME <text>" (moves the carousel to the first game whose file name contains it),
+// "<player> HOLD <button> <frames>" (a press held that long, e.g. to walk),
 // "<player> LINK ON|OFF" (the pause menu's link cable switch, for a running GBA game),
+// "<player> WIRELESS ON|OFF" (its Wireless Adapter switch, the same way),
 // "SHOT" to save the displayed frame to DEV_SHOT, "AUDIO <seconds>" to record what goes to
 // the audio port to DEV_AUDIO (48 kHz float stereo WAV), or "SAMPLEALL 1|0" to make unheard
 // games compute their sound anyway (as before they skipped it, to measure the gain). Player
@@ -168,7 +170,7 @@ static bool kb_type(char* name, char c) {
 #define DEV_AUDIO DATA_DIR "/audio.wav"
 #define DEV_QUEUE 4096 // ~320 KB, dev builds only: random-play scripts send thousands of lines
 
-static struct { int player; u32 buttons; int wait; char text[16]; char game[48]; int link; } dev_queue[DEV_QUEUE];
+static struct { int player; u32 buttons; int wait; char text[16]; char game[48]; int link, wireless; } dev_queue[DEV_QUEUE];
 static int dev_head, dev_tail, dev_hold, dev_wait, dev_wait_gba = -1;
 static bool dev_shot;
 static bool dev_connected[MAX_PLAYERS];
@@ -203,7 +205,7 @@ static void dev_poll_file(void) {
 		return;
 	}
 	char line[96], word[48], text[16];
-	int player;
+	int player, frames;
 	while (fgets(line, sizeof(line), f)) {
 		int next = (dev_tail + 1) % DEV_QUEUE;
 		if (next == dev_head) {
@@ -248,6 +250,12 @@ static void dev_poll_file(void) {
 		} else if (sscanf(line, "%d LINK %3s", &player, word) == 2 && player >= 0 && player < MAX_PLAYERS) {
 			dev_queue[dev_tail] = (typeof(dev_queue[0])) { player, 0, 0 };
 			dev_queue[dev_tail].link = strcmp(word, "ON") == 0 ? 2 : 1;
+		} else if (sscanf(line, "%d WIRELESS %3s", &player, word) == 2 && player >= 0 && player < MAX_PLAYERS) {
+			dev_queue[dev_tail] = (typeof(dev_queue[0])) { player, 0, 0 };
+			dev_queue[dev_tail].wireless = strcmp(word, "ON") == 0 ? 2 : 1;
+		} else if (sscanf(line, "%d HOLD %31s %d", &player, word, &frames) == 3 && player >= 0 && player < MAX_PLAYERS) {
+			dev_skip();
+			dev_queue[dev_tail] = (typeof(dev_queue[0])) { player, dev_button(word), frames > 2 ? frames : 2 };
 		} else if (sscanf(line, "%d TYPE %15[^\r\n]", &player, text) == 2 && player >= 0 && player < MAX_PLAYERS) {
 			dev_skip();
 			dev_queue[dev_tail] = (typeof(dev_queue[0])) { player, 0, 0 };
@@ -490,6 +498,13 @@ static void dev_apply(int frame) {
 		dev_head = (dev_head + 1) % DEV_QUEUE;
 		return;
 	}
+	if (cmd->wireless) {
+		emu_wireless_set(p, cmd->wireless == 2);
+		printf("dev: P%d wireless adapter %s%s\n", cmd->player + 1, cmd->wireless == 2 ? "on" : "off",
+		       emu_link_available(p) ? "" : " ignored: no running GBA game");
+		dev_head = (dev_head + 1) % DEV_QUEUE;
+		return;
+	}
 	if (cmd->text[0]) {
 		for (const char* c = cmd->text; *c && p->state == PS_SAVE_RENAME; ++c) {
 			char k = toupper((unsigned char) *c);
@@ -500,26 +515,28 @@ static void dev_apply(int frame) {
 		dev_head = (dev_head + 1) % DEV_QUEUE;
 		return;
 	}
-	// Held and released for at least 2 emulated frames too, so a slow emulator sees the press.
-	// Only in game: a press that pauses a lone game stops its emulator, which then never would.
+	// Held for 2 frames (HOLD: its count), then released for 6, and for as many emulated frames
+	// too, so a slow emulator sees the press. Only in game: a press that pauses a lone game stops
+	// its emulator, which then never would.
 	static int gba_mark;
+	int len = cmd->wait > 2 ? cmd->wait : 2;
 	bool in_game = p->core && p->state == PS_PLAYING;
 	int gba = in_game ? p->frames_done : 1 << 30; // menus: display frames only
 	if (dev_hold == 0) {
 		gba_mark = in_game ? gba : 0;
 	}
-	if (dev_hold < 2 || (dev_hold == 2 && gba < gba_mark + 2)) {
+	if (dev_hold < len || (dev_hold == len && gba < gba_mark + len)) {
 		if (dev_hold == 0) p->pressed |= cmd->buttons;
 		p->held |= cmd->buttons;
-		if (dev_hold < 2) {
-			++dev_hold; // then stays at 2 until the emulator has seen 2 frames of it
+		if (dev_hold < len) {
+			++dev_hold; // then stays at len until the emulator has seen as many frames of it
 		}
 		return;
 	}
-	if (dev_hold == 2) {
+	if (dev_hold == len) {
 		gba_mark = in_game ? gba : 0;
 	}
-	if (++dev_hold >= 8 && gba >= gba_mark + 2) {
+	if (++dev_hold >= len + 6 && gba >= gba_mark + 2) {
 		dev_hold = 0;
 		dev_head = (dev_head + 1) % DEV_QUEUE;
 	}
@@ -837,7 +854,9 @@ static void update_player(struct player* p) {
 	case PS_PAUSED:
 		if (in & BTN_UP) p->pause_sel = (p->pause_sel + PAUSE_COUNT - 1) % PAUSE_COUNT;
 		if (in & BTN_DOWN) p->pause_sel = (p->pause_sel + 1) % PAUSE_COUNT;
-		if (p->pause_sel == PAUSE_LINK && !emu_link_available(p)) p->pause_sel += in & BTN_UP ? -1 : 1; // not shown
+		while ((p->pause_sel == PAUSE_LINK || p->pause_sel == PAUSE_WIRELESS) && !emu_link_available(p)) {
+			p->pause_sel += in & BTN_UP ? -1 : 1; // not shown
+		}
 		if (in & (BTN_CIRCLE | BTN_L3 | BTN_R3)) p->state = PS_PLAYING;
 		if (in & BTN_CROSS) {
 			switch (p->pause_sel) {
@@ -850,6 +869,9 @@ static void update_player(struct player* p) {
 				break;
 			case PAUSE_LINK:
 				emu_link_set(p, !p->link_wanted);
+				break;
+			case PAUSE_WIRELESS:
+				emu_wireless_set(p, !p->rfu_wanted);
 				break;
 			case PAUSE_PERF:
 				show_perf = !show_perf;

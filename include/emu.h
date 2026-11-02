@@ -19,10 +19,12 @@ void emu_frame_end(void);
 // The running game's screen in pixels: 240x160 (GBA) or 160x144 (GB/GBC), drawn from the
 // top-left corner of the player's frames and textures.
 void emu_screen_size(const struct player* p, unsigned* w, unsigned* h);
-// A running GBA game can be plugged into the link cable (GB/GBC games have none). The switch
-// takes effect on the player's emulation thread; the next game starts unplugged.
+// A running GBA game can be plugged into the link cable or have a Wireless Adapter on its link
+// port, not both (GB/GBC games have neither). The switches take effect on the player's emulation
+// thread; the next game starts with neither.
 bool emu_link_available(const struct player* p);
 void emu_link_set(struct player* p, bool on);
+void emu_wireless_set(struct player* p, bool on);
 // Player currently using this save, or -1.
 int emu_save_owner(const char* game_file, const char* save);
 
