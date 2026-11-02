@@ -13,6 +13,8 @@ cd "$(dirname "$0")/.."
 if [ -f .env ]; then . ./.env; fi # your settings (copy .env.example), not in git
 PS3="${PS3:?set PS3=<console IP> (or in .env, see .env.example)}"
 H="ftp://$PS3/dev_hdd0"
+. tools/lock.sh # one session at a time drives a console (tools/lock.sh)
+case "$1" in deploy|cmd|shot|exit|restart) claim "ps3-$PS3" ;; esac
 # Running with a process (the title ID shows with pid=0 while the XMB still loads it). Reading
 # files over FTP during that load hung a HEN console: deploy reads the log only after this.
 running() { curl -s --connect-timeout 5 "http://$PS3/cpursx.ps3" | tr -d '\n' | sed 's/<[^>]*>//g' | grep -q -E 'PGBA00001[^=]*pid=0*[1-9a-f]'; }

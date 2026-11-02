@@ -18,6 +18,8 @@ can cost a console's drive.
 - [docs/jit.md](docs/jit.md): the ARM/Thumb to PowerPC JIT's design, exactness and self-check.
 - [docs/performance-plan.md](docs/performance-plan.md): how 4 players reached 60 fps, with every
   measurement.
+- [docs/rom-patching.md](docs/rom-patching.md), [docs/wireless-adapter.md](docs/wireless-adapter.md):
+  plans of features in progress.
 - Coding agents: link this file as the agent's instructions (e.g. `ln -s CONTRIBUTING.md
   CLAUDE.md` for Claude Code; `CLAUDE.md` is gitignored) and keep personal notes (your consoles,
   preferences) in `CLAUDE.local.md`, also gitignored.
@@ -70,6 +72,10 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
     froze a console once.
   - Hung app: `tools/ps3.sh restart` (clean reboot through webMAN). On HEN that turns HEN off:
     power-cycle there instead. Never cut power while the PS3 writes to its drive.
+- Parallel sessions on one machine (e.g. one worktree per feature) share RPCS3 and the consoles:
+  `tools/rpcs3.sh` and `tools/ps3.sh` claim the device for the current git branch and refuse while
+  another branch holds it (`tools/lock.sh status`; `tools/lock.sh release <device>` when done; a
+  lock unused for 20 minutes expires).
 - On HEN, change one thing per launch, and send no request to webMAN (FTP or HTTP) while the
   XMB loads the app: ~30 s after a launch (`LAUNCH_WAIT=30` for `deploy`). A hang there takes
   the console off the network. See the notes' HEN section.
@@ -231,8 +237,5 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   switch and the drawing counters still to check on the console.
 - Todo: the manual's URL for Help's QR code (`MANUAL_URL`, top of `source/ui.c`) is a placeholder.
 - Next: 3-4 player UI polish, trades and battles tested with several cables.
-- Idea, not started: ROM patching (IPS/UPS/BPS with mGBA's patch code, no xdelta). Patches in a
-  `patches/` folder (FTP or the phone page); Square on a game in the carousel lists those made
-  for it (UPS/BPS checked by checksum); the PS3 writes a new ROM once (temporary file, renamed,
-  never overwriting, result checked), only while nobody is in a game; it then shows as a normal
-  game with its own saves.
+- Planned: ROM patching ([docs/rom-patching.md](docs/rom-patching.md)) and the GBA Wireless
+  Adapter ([docs/wireless-adapter.md](docs/wireless-adapter.md)), each in its own branch.

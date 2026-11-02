@@ -10,6 +10,8 @@
 set -e
 cd "$(dirname "$0")/.."
 D="$HOME/Library/Application Support/rpcs3/dev_hdd0/ps3gba"
+. tools/lock.sh # one session at a time drives RPCS3 (tools/lock.sh)
+case "$1" in run|cmd|shot) claim rpcs3 ;; esac
 case "$1" in
 run)
 	pkill -9 rpcs3 || true

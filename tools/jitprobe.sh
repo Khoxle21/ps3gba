@@ -14,6 +14,8 @@ cd "$(dirname "$0")/.."
 if [ -f .env ]; then . ./.env; fi # your settings (copy .env.example), not in git
 PS3="${PS3:?set PS3=<console IP> (or in .env, see .env.example)}"
 H="ftp://$PS3/dev_hdd0"
+. tools/lock.sh # one session at a time drives a console or RPCS3 (tools/lock.sh)
+case "$1" in deploy|run) claim "ps3-$PS3" ;; rpcs3) claim rpcs3 ;; esac
 del() { curl -s -o /dev/null -Q "DELE $1" "$H/" || true; }
 build() { docker run --rm -e CAVE_MB -e WRITABLE_TEXT -e PROC_PARAM -e IMPORTS -v "$PWD":/src -w /src/tests/jitprobe ps3gba-toolchain sh -c "make clean >/dev/null; make $1"; }
 seed() { [ -n "$FROM" ] && printf '%d start\n%d end seeded\n' $((FROM - 1)) $((FROM - 1)); true; }
