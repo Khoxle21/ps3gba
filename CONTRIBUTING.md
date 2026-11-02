@@ -202,7 +202,12 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
     e.g. "FireRed", in docs and tool defaults);
   - personal notes go in `CLAUDE.local.md` or `.env` (not in git).
 - Every user-visible change adds a `CHANGELOG.md` entry, newest first: a display change or a fix
-  is a 0.0.1 bump, a major step or optimization a 0.1 step; 1.0.0 will be the first release.
+  is a 0.0.1 bump, a major step or optimization a 0.1 step; 1.0.0 will be the first stable
+  release.
+- Every version bump is published: once its commit is pushed, `tools/release.sh` builds the
+  release package, tags `vX.Y.Z` and creates the GitHub release with the changelog entry and
+  `ps3gba-vX.Y.Z.pkg` (needs `gh` logged into the repo owner's account; before 1.0.0 they are
+  pre-releases).
 - Commit messages describe the change; no AI attribution lines (`Co-Authored-By` etc.).
 - Update the docs with what you learn: hardware findings in `docs/ps3-homebrew-notes.md`, JIT
   changes in `docs/jit.md`, measurements in `docs/performance-plan.md`, workflow and code map

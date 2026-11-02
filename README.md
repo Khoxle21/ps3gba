@@ -30,7 +30,8 @@ No games are included: use dumps of the cartridges you own.
 
 ## Install and play
 
-1. Get `ps3gba.pkg` from this project's releases (or build it yourself, see
+1. Get the latest `ps3gba-vX.Y.Z.pkg` from this project's
+   [releases](https://github.com/Khoxle21/ps3gba/releases) (or build it yourself, see
    [CONTRIBUTING.md](CONTRIBUTING.md)) and install it on the PS3: copy it to a USB stick or to
    `/dev_hdd0/packages/`, then use Package Manager > Install Package Files.
 2. Copy your games to `/dev_hdd0/ps3gba/roms/` on the PS3 over FTP (`.gba`, `.gb`, `.gbc`), or
