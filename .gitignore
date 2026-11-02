@@ -17,3 +17,7 @@ CLAUDE.md
 CLAUDE.local.md
 .env
 dist/
+# Patches of real games: never commit (tools/make_patch_tests.py makes synthetic ones)
+*.ips
+*.ups
+*.bps

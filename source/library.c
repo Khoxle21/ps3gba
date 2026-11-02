@@ -189,8 +189,7 @@ int library_read_games(struct game* games) {
 	return n;
 }
 
-// Same game for cover purposes: GBA codes without their region letter (BPRE/BPRF: FireRed).
-static bool same_game(const struct game* a, const struct game* b) {
+bool library_same_game(const struct game* a, const struct game* b) {
 	bool gba = a->system == SYS_GBA;
 	return a->code[0] && gba == (b->system == SYS_GBA) && strncmp(a->code, b->code, gba ? 3 : sizeof(a->code)) == 0;
 }
@@ -221,7 +220,7 @@ static void find_covers(struct game* games, int n, const struct game* old, int o
 	for (int i = 0; i < n; ++i) {
 		struct game* g = &games[i];
 		for (int j = 0; j < n && !g->has_cover; ++j) {
-			if (games[j].has_cover && !games[j].cover_shared && same_game(g, &games[j])) {
+			if (games[j].has_cover && !games[j].cover_shared && library_same_game(g, &games[j])) {
 				g->cover = games[j].cover;
 				g->has_cover = g->cover_shared = true;
 			}
@@ -247,6 +246,7 @@ void library_scan(void) {
 	mkdir(ROM_DIR, 0777);
 	mkdir(SAVE_DIR, 0777);
 	mkdir(COVER_DIR, 0777);
+	mkdir(PATCH_DIR, 0777);
 	lib_num_games = library_read_games(lib_games);
 	for (int i = 0; i < lib_num_games; ++i) {
 		migrate_legacy_save(&lib_games[i]);

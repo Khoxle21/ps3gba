@@ -23,6 +23,7 @@
 #include "intro.h"
 #include "jit/jit.h"
 #include "library.h"
+#include "rompatch.h"
 #include "ui.h"
 #include "web.h"
 
@@ -152,6 +153,7 @@ static bool kb_type(char* name, char c) {
 // "WAITGBA <frames>" (frames emulated by player 1: deterministic on slow hosts),
 // "<player> TYPE <text>" (types it on the rename keyboard, as if key by key),
 // "<player> GAME <text>" (moves the carousel to the first game whose file name contains it),
+// "<player> PATCH <text>" (selects the first patch whose file name contains it, once listed),
 // "<player> HOLD <button> <frames>" (a press held that long, e.g. to walk),
 // "<player> LINK ON|OFF" (the pause menu's link cable switch, for a running GBA game),
 // "<player> WIRELESS ON|OFF" (its Wireless Adapter switch, the same way),
@@ -170,7 +172,7 @@ static bool kb_type(char* name, char c) {
 #define DEV_AUDIO DATA_DIR "/audio.wav"
 #define DEV_QUEUE 4096 // ~320 KB, dev builds only: random-play scripts send thousands of lines
 
-static struct { int player; u32 buttons; int wait; char text[16]; char game[48]; int link, wireless; } dev_queue[DEV_QUEUE];
+static struct { int player; u32 buttons; int wait; char text[16]; char game[48]; char patch[48]; int link, wireless; } dev_queue[DEV_QUEUE];
 static int dev_head, dev_tail, dev_hold, dev_wait, dev_wait_gba = -1;
 static bool dev_shot;
 static bool dev_connected[MAX_PLAYERS];
@@ -216,6 +218,10 @@ static void dev_poll_file(void) {
 			intro_skip();
 			dev_queue[dev_tail] = (typeof(dev_queue[0])) { player, 0, 0 };
 			snprintf(dev_queue[dev_tail].game, sizeof(dev_queue[0].game), "%s", word);
+		} else if (sscanf(line, "%d PATCH %47[^\r\n]", &player, word) == 2 && player >= 0 && player < MAX_PLAYERS) {
+			dev_skip();
+			dev_queue[dev_tail] = (typeof(dev_queue[0])) { player, 0, 0 };
+			snprintf(dev_queue[dev_tail].patch, sizeof(dev_queue[0].patch), "%s", word);
 		} else if (strncmp(line, "SHOT", 4) == 0) {
 			dev_queue[dev_tail] = (typeof(dev_queue[0])) { -2, 0, 0 }; // in order, after earlier commands
 		} else if (sscanf(line, "RENDER %31s", word) == 1) { // for games started from now on
@@ -491,6 +497,22 @@ static void dev_apply(int frame) {
 		return;
 	}
 	struct player* p = &players[cmd->player];
+	if (cmd->patch[0]) { // PATCH: by name, whatever the list's order
+		if (p->state == PS_PATCHES && p->num_patches < 0) {
+			return; // still reading: try again next frame
+		}
+		int i = 0;
+		while (p->state == PS_PATCHES && i < p->num_patches && !strstr(p->patches[i].file, cmd->patch)) {
+			++i;
+		}
+		bool found = p->state == PS_PATCHES && i < p->num_patches;
+		if (found) {
+			p->patch_sel = i;
+		}
+		printf("dev: P%d patch '%s': %s\n", cmd->player + 1, cmd->patch, found ? p->patches[i].file : "no match");
+		dev_head = (dev_head + 1) % DEV_QUEUE;
+		return;
+	}
 	if (cmd->link) {
 		emu_link_set(p, cmd->link == 2);
 		printf("dev: P%d link %s%s\n", cmd->player + 1, cmd->link == 2 ? "on" : "off",
@@ -660,6 +682,27 @@ static void rename_confirm(struct player* p) {
 	}
 }
 
+// A refusal with its reason under the player's eyes for a few seconds.
+static void refuse(struct player* p, const char* why) {
+	p->flash_frames = 16;
+	snprintf(p->toast, sizeof(p->toast), "%s", why);
+	p->toast_frames = 150;
+}
+
+// The carousel on this game (e.g. one just built), without sliding through the others.
+static void show_game(struct player* p, const char* file) {
+	int g = library_find(file);
+	if (g >= 0) {
+		p->game_sel = g;
+		p->game_scroll = g;
+	}
+}
+
+static void patch_error(struct player* p, const char* error) {
+	snprintf(p->patch_result.error, sizeof(p->patch_result.error), "%s", error);
+	p->state = PS_PATCH_ERROR;
+}
+
 // L1/R1 in the carousel: the previous or next system that has games, where the player left it.
 static void switch_catalog(struct player* p, int dir) {
 	int system = lib_games[p->game_sel].system, first;
@@ -680,6 +723,9 @@ static void update_player(struct player* p) {
 	if (p->flash_frames > 0) {
 		--p->flash_frames;
 	}
+	if (p->toast_frames > 0) {
+		--p->toast_frames;
+	}
 	switch (p->state) {
 	case PS_EMPTY:
 		if (p->connected && (in & (BTN_START | BTN_CROSS))) {
@@ -695,10 +741,21 @@ static void update_player(struct player* p) {
 			if (in & (BTN_L1 | BTN_R1)) {
 				switch_catalog(p, in & BTN_R1 ? 1 : -1);
 			}
-			if (in & BTN_CROSS) {
+			if ((in & BTN_CROSS) && rompatch_busy()) {
+				refuse(p, "WAIT: A GAME IS BEING PATCHED");
+			} else if (in & (BTN_CROSS | BTN_SQUARE)) {
 				p->game = p->game_sel;
 				snprintf(p->game_file, sizeof(p->game_file), "%s", lib_games[p->game].file);
-				open_saves(p);
+				if (in & BTN_CROSS) {
+					open_saves(p);
+				} else {
+					rompatch_list_async(p->index, p->game_file);
+					p->num_patches = -1;
+					p->patch_sel = 0;
+					p->patch_cleanup = false;
+					p->state = PS_PATCHES;
+					break;
+				}
 			}
 		}
 		if (in & BTN_CIRCLE) p->state = PS_EMPTY;
@@ -728,7 +785,9 @@ static void update_player(struct player* p) {
 			p->state = PS_SAVE_MENU;
 			break;
 		}
-		if (in & BTN_CROSS) {
+		if ((in & BTN_CROSS) && rompatch_busy()) {
+			refuse(p, "WAIT: A GAME IS BEING PATCHED");
+		} else if (in & BTN_CROSS) {
 			if (p->save_sel == p->num_saves) {
 				free_save_name(p, "SAVE", 1, p->save_name, sizeof(p->save_name));
 			} else if (save_taken(p, p->saves[p->save_sel].name)) {
@@ -831,6 +890,90 @@ static void update_player(struct player* p) {
 		share_saves(p);
 		break;
 	}
+	case PS_PATCHES: {
+		if (p->num_patches < 0) {
+			p->num_patches = rompatch_list_result(p->index, p->patches);
+		}
+		if (in & BTN_CIRCLE) {
+			p->state = PS_GAMES;
+			break;
+		}
+		if (p->num_patches <= 0 || emu_anyone_playing()) {
+			break; // reading, none, or "all players must quit their games"
+		}
+		int rows = p->num_patches;
+		if (in & BTN_UP) p->patch_sel = (p->patch_sel + rows - 1) % rows;
+		if (in & BTN_DOWN) p->patch_sel = (p->patch_sel + 1) % rows;
+		const struct patch_info* patch = &p->patches[p->patch_sel];
+		if ((in & BTN_CROSS) && patch->fit == FIT_OTHER) {
+			patch_error(p, "THIS PATCH IS MADE FOR ANOTHER VERSION OF THE GAME (ANOTHER REGION OR REVISION).");
+		} else if ((in & BTN_CROSS) && patch->fit == FIT_BUILT) {
+			patch_error(p, "ITS GAME IS ALREADY THERE. RENAME THE PATCH FILE TO MAKE ANOTHER ONE.");
+		} else if (in & BTN_CROSS) {
+			p->menu_sel = 0; // NO
+			p->state = PS_PATCH_CONFIRM;
+		}
+		break;
+	}
+	case PS_PATCH_CONFIRM:
+		if (in & (BTN_UP | BTN_DOWN)) p->menu_sel ^= 1;
+		if ((in & BTN_CIRCLE) || ((in & BTN_CROSS) && p->menu_sel == 0) || emu_anyone_playing()) {
+			p->state = PS_PATCHES; // which says why when someone started a game meanwhile
+		} else if ((in & BTN_CROSS) && !rompatch_build_async(p->index, p->game_file, p->patches[p->patch_sel].file)) {
+			patch_error(p, "ANOTHER PLAYER IS PATCHING A GAME. TRY AGAIN IN A MOMENT.");
+		} else if (in & BTN_CROSS) {
+			p->patch_cleanup = false;
+			p->state = PS_PATCH_BUSY;
+		}
+		break;
+	case PS_PATCH_BUSY: {
+		// A new game comes in with a library rescan, which web_frame() takes after this.
+		if (rompatch_job_step(p->index) != STEP_DONE || library_rescan_ready()) {
+			break;
+		}
+		struct patch_result r;
+		rompatch_job_take(p->index, &r);
+		if (!r.ok) {
+			if (p->patch_cleanup) show_game(p, p->patch_result.game);
+			patch_error(p, r.error);
+		} else if (!p->patch_cleanup) {
+			p->patch_result = r;
+			show_game(p, r.game);
+			p->menu_sel = 0; // KEEP
+			p->state = PS_PATCH_DONE;
+		} else {
+			show_game(p, p->patch_result.game);
+			p->state = PS_GAMES;
+		}
+		break;
+	}
+	case PS_PATCH_DONE: {
+		// KEEP, DELETE (the patch), and in a chain DELETE BOTH (the patch and the base).
+		const char* base = p->patch_result.base;
+		int rows = base[0] ? 3 : 2;
+		if (in & BTN_UP) p->menu_sel = (p->menu_sel + rows - 1) % rows;
+		if (in & BTN_DOWN) p->menu_sel = (p->menu_sel + 1) % rows;
+		bool both = p->menu_sel == 2, base_played = false;
+		for (int i = 0; i < MAX_PLAYERS; ++i) {
+			base_played |= players[i].started && strcmp(players[i].game_file, base) == 0;
+		}
+		if ((in & BTN_CIRCLE) || ((in & BTN_CROSS) && p->menu_sel == 0)) {
+			p->state = PS_GAMES;
+		} else if ((in & BTN_CROSS) && both && base_played) {
+			p->flash_frames = 16; // someone started it meanwhile
+		} else if ((in & BTN_CROSS) && !rompatch_clean_async(p->index, p->patches[p->patch_sel].file, both ? base : "")) {
+			p->flash_frames = 16; // another player's build or cleanup: try again
+		} else if (in & BTN_CROSS) {
+			p->patch_cleanup = true;
+			p->state = PS_PATCH_BUSY;
+		}
+		break;
+	}
+	case PS_PATCH_ERROR:
+		if (in & (BTN_CROSS | BTN_CIRCLE)) {
+			p->state = p->patch_cleanup ? PS_GAMES : PS_PATCHES;
+		}
+		break;
 	case PS_LOADING:
 		switch (emu_load_status(p)) {
 		case LOAD_OK:

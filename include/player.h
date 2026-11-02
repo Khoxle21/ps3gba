@@ -12,6 +12,7 @@
 #include "gfx.h"
 #include "library.h"
 #include "rfu.h"
+#include "rompatch.h"
 #include "spu_render.h"
 
 #define MAX_PLAYERS 4
@@ -30,6 +31,13 @@ enum player_state {
 	PS_SAVE_DELETE, // delete confirmation
 	PS_SAVE_BUSY,   // the library thread renames, copies or deletes it
 	PS_PHONE,   // QR code of the player's phone page (web.c)
+	// ROM patching (rompatch.c), from Square in the carousel: the patches for the selected game,
+	// "create it?", building it (or deleting after it), the new game's cleanup question, an error.
+	PS_PATCHES,
+	PS_PATCH_CONFIRM,
+	PS_PATCH_BUSY,
+	PS_PATCH_DONE,
+	PS_PATCH_ERROR,
 };
 
 enum load_status { LOAD_PENDING, LOAD_OK, LOAD_FAILED };
@@ -69,6 +77,17 @@ struct player {
 	int save_op;
 	char op_save[64], op_to[64];
 	bool name_taken; // the typed name is already used
+	// A short refusal shown in the carousel and the saves list (e.g. no game starts while one is
+	// being patched).
+	char toast[48];
+	int toast_frames;
+	// ROM patching: the list for game_file, the chosen one (patch_sel), the build's result (the
+	// new game and a base the cleanup may delete), whether the job running is that cleanup.
+	int patch_sel;
+	int num_patches; // -1 while it is being read
+	struct patch_info patches[PATCH_LIST_MAX];
+	struct patch_result patch_result;
+	bool patch_cleanup;
 
 	// Emulation (valid while PS_PLAYING / PS_PAUSED)
 	int game;           // index in lib_games, re-mapped by game_file after a rescan

@@ -1,6 +1,6 @@
 #!/bin/sh
 # Phone server tests against the app running in RPCS3 (NET=1 tools/rpcs3.sh run, dev build):
-# uploads, downloads, names, and everything that must be refused (bad tokens, path traversal,
+# uploads (games, saves, covers, patches), downloads, names, and everything that must be refused (bad tokens, path traversal,
 # oversized, interrupted and stalled uploads). Removes what it added from RPCS3's drive.
 set -e
 cd "$(dirname "$0")/.."
@@ -16,7 +16,8 @@ COVER=$(ls "$D"/covers/*.png | head -1)
 T=$(mktemp -d)
 cp "$D/players.txt" "$T/players.txt" 2>/dev/null || true
 cleanup() {
-	rm -rf "$D/roms/$GAME.gba" "$D/saves/$GAME" "$D/covers/$GAME.png" "$D/roms/gb/$GAME.gb" "$D/saves/$GAME.gb" "$D/roms/x.gba" "$T"
+	rm -rf "$D/roms/$GAME.gba" "$D/saves/$GAME" "$D/covers/$GAME.png" "$D/roms/gb/$GAME.gb" "$D/saves/$GAME.gb" "$D/roms/x.gba" \
+		"$D/patches/$GAME.ips" "$T"
 	if [ -f "$T/players.txt" ]; then cp "$T/players.txt" "$D/players.txt"; else rm -f "$D/players.txt"; fi
 }
 trap cleanup EXIT
@@ -89,6 +90,15 @@ check "save name too long" 400 --data-binary @"$SAVE" "${B}save?game=$G&name=ABC
 head -c $((257 << 10)) /dev/zero > "$T/big.sav"
 check "save too big" 413 --data-binary @"$T/big.sav" "${B}save?game=$G&name=BIG"
 
+printf 'PATCH\000\001\000\000\001\052EOF' > "$T/test.ips" # one byte at 0x100
+check "patch" 200 --data-binary @"$T/test.ips" "${B}patch?name=$G.IPS"
+same "patch bytes, in patches/" "$T/test.ips" "$D/patches/$GAME.ips"
+check "patch twice" 409 --data-binary @"$T/test.ips" "${B}patch?name=$G.ips"
+check "not a patch" 415 --data-binary @"$SAVE" "${B}patch?name=fake.ups"
+check "patch not .ips .ups .bps" 400 --data-binary @"$T/test.ips" "${B}patch?name=x.xdelta"
+check "patch traversal" 400 --data-binary @"$T/test.ips" "${B}patch?name=..%2Fevil.ips"
+check "patch too big" 413 --data-binary @"$T/big.gba" "${B}patch?name=big.bps"
+
 check "cover" 200 --data-binary @"$COVER" "${B}cover?game=$G"
 check "cover read" 200 "${B}cover?game=$G"
 same "cover bytes" "$T/body" "$COVER"
@@ -141,5 +151,7 @@ leftovers=$(ls "$D/tmp" | wc -l | tr -d ' ')
 [ "$leftovers" = 0 ] && echo "ok   no partial files left" || { echo "FAIL $leftovers partial files in tmp/"; fails=$((fails + 1)); }
 [ ! -e "$D/roms/cut.gba" ] && [ ! -e "$D/roms/stall.gba" ] && [ ! -e "$D/roms/fake.gba" ] && echo "ok   no refused ROM on the drive" ||
 	{ echo "FAIL a refused ROM was kept"; fails=$((fails + 1)); }
+[ ! -e "$D/patches/fake.ups" ] && [ ! -e "$D/patches/big.bps" ] && echo "ok   no refused patch on the drive" ||
+	{ echo "FAIL a refused patch was kept"; fails=$((fails + 1)); }
 echo "$fails failed"
 [ "$fails" = 0 ]

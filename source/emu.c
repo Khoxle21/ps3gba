@@ -1093,6 +1093,15 @@ void emu_screen_size(const struct player* p, unsigned* w, unsigned* h) {
 	}
 }
 
+bool emu_anyone_playing(void) {
+	for (int i = 0; i < MAX_PLAYERS; ++i) {
+		if (players[i].started) {
+			return true;
+		}
+	}
+	return false;
+}
+
 int emu_save_owner(const char* game_file, const char* save) {
 	for (int i = 0; i < MAX_PLAYERS; ++i) {
 		const struct player* p = &players[i];

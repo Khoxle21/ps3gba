@@ -11,6 +11,8 @@
 #define ROM_DIR   DATA_DIR "/roms"
 #define SAVE_DIR  DATA_DIR "/saves"
 #define COVER_DIR DATA_DIR "/covers"
+#define PATCH_DIR DATA_DIR "/patches" // IPS, UPS and BPS patches (rompatch.c)
+#define TMP_DIR   DATA_DIR "/tmp"     // files being written, renamed into place whole (emptied at boot)
 
 #define LIB_MAX_GAMES 256
 #define LIB_MAX_SAVES 32
@@ -61,6 +63,9 @@ int library_read_games(struct game* out);
 int library_rom_system(const char* name);
 // Index of a game by name (struct game.file), or -1.
 int library_find(const char* file);
+// Versions of one game: the same header code, for GBA without its region letter (BPRE/BPRF:
+// FireRed). Hacks keep their original's.
+bool library_same_game(const struct game* a, const struct game* b);
 // Games are identified by file name, which stays valid when the library is rescanned.
 // Reads a game's saves on a background thread: a folder the drive hasn't cached takes up to
 // ~60 ms, which would stall every player's game. One request per slot (player) at a time.

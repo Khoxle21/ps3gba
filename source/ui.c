@@ -10,6 +10,7 @@
 #include "emu.h"
 #include "intro.h"
 #include "qrcodegen.h"
+#include "rompatch.h"
 #include "ui.h"
 #include "web.h"
 
@@ -212,9 +213,9 @@ static void text_centered(float cx, float y, int size, const char* s, u32 color)
 	text(cx - gfx_text_width(s, size) / 2, y, size, s, color);
 }
 
-// Shrinks the text size, then truncates, until `s` fits in `max_w`.
-static int fit_text(char* s, int size, float max_w) {
-	while (size > 1 && gfx_text_width(s, size) > max_w) {
+// Shrinks the text size (down to `min`), then truncates, until `s` fits in `max_w`.
+static int fit_text_min(char* s, int size, int min, float max_w) {
+	while (size > min && gfx_text_width(s, size) > max_w) {
 		--size;
 	}
 	int max_chars = max_w / (8 * size);
@@ -222,6 +223,34 @@ static int fit_text(char* s, int size, float max_w) {
 		strcpy(s + max_chars - 2, "..");
 	}
 	return size;
+}
+
+static int fit_text(char* s, int size, float max_w) {
+	return fit_text_min(s, size, 1, max_w);
+}
+
+#define WRAP_LINES 8
+#define WRAP_COLS 96
+
+// Splits s into lines of at most max_w at this text size, between words ('\n' breaks too);
+// returns how many.
+static int wrap(const char* s, int size, float max_w, char lines[WRAP_LINES][WRAP_COLS]) {
+	int cols = max_w / (8 * size), n = 0;
+	if (cols < 1) cols = 1;
+	if (cols > WRAP_COLS - 1) cols = WRAP_COLS - 1;
+	while (*s && n < WRAP_LINES) {
+		int len = strcspn(s, "\n"), cut = len;
+		if (len > cols) {
+			for (cut = cols; cut > 0 && s[cut] != ' '; --cut) {
+			}
+			if (cut == 0) cut = cols; // a word longer than a line
+		}
+		snprintf(lines[n++], WRAP_COLS, "%.*s", cut, s);
+		for (s += cut; *s == ' '; ++s) {
+		}
+		if (*s == '\n') ++s;
+	}
+	return n;
 }
 
 // A label on a colored tab; returns its width.
@@ -273,11 +302,15 @@ static float catalog_tabs(const struct player* p, float right, float y, int show
 #define HINT_ICON_GAP 4  // font pixels between a button icon and its label
 #define HINT_GAP 14      // font pixels between two hints
 
-static float hint(float x, float y, const struct gfx_tex* icon, u32 icon_color, const char* label) {
+static float hint_gap(float x, float y, const struct gfx_tex* icon, u32 icon_color, const char* label, int gap) {
 	sprite(icon, x, y, ts, icon_color);
 	x += (icon->w + HINT_ICON_GAP) * ts;
 	text(x, y, ts, label, COL_DIM);
-	return x + gfx_text_width(label, ts) + HINT_GAP * ts;
+	return x + gfx_text_width(label, ts) + gap * ts;
+}
+
+static float hint(float x, float y, const struct gfx_tex* icon, u32 icon_color, const char* label) {
+	return hint_gap(x, y, icon, icon_color, label, HINT_GAP);
 }
 
 // Button colors as printed on the pad.
@@ -293,26 +326,40 @@ struct hint_def {
 	const char* label;
 };
 
-static float hints_width(const struct hint_def* h, int n) {
-	float w = -HINT_GAP * ts;
+static float hints_width_gap(const struct hint_def* h, int n, int gap) {
+	float w = -gap * ts;
 	for (int i = 0; i < n; ++i) {
-		w += (h[i].icon->w + HINT_ICON_GAP + HINT_GAP) * ts + gfx_text_width(h[i].label, ts);
+		w += (h[i].icon->w + HINT_ICON_GAP + gap) * ts + gfx_text_width(h[i].label, ts);
 	}
 	return w;
 }
 
+static float hints_width(const struct hint_def* h, int n) {
+	return hints_width_gap(h, n, HINT_GAP);
+}
+
 // Button hints right-aligned at `right`, e.g. [X] PLAY  [O] BACK. Every screen lists each button
-// that does something there (the d-pad aside), on one row even in a 2x2 slot at 720p.
-static void hint_row(float right, float y, const struct hint_def* h, int n) {
-	float x = right - hints_width(h, n);
+// that does something there (the d-pad aside), on one row even in a 2x2 slot at 720p: when they
+// would reach `left`, the gaps between them shrink.
+static void hint_row_in(float left, float right, float y, const struct hint_def* h, int n) {
+	int gap = HINT_GAP;
+	while (gap > HINT_ICON_GAP && right - hints_width_gap(h, n, gap) < left) {
+		--gap;
+	}
+	float x = right - hints_width_gap(h, n, gap);
 	for (int i = 0; i < n; ++i) {
-		x = hint(x, y, h[i].icon, h[i].color, h[i].label);
+		x = hint_gap(x, y, h[i].icon, h[i].color, h[i].label, gap);
 	}
 }
 
+static void hint_row(float right, float y, const struct hint_def* h, int n) {
+	hint_row_in(-1e9f, right, y, h, n);
+}
+
+// [X] confirm [O] back, either one NULL for none.
 static void hints(float right, float y, const char* confirm, const char* back) {
 	const struct hint_def h[] = { { &tex_cross, COL_BTN_CROSS, confirm }, { &tex_circle, COL_BTN_CIRCLE, back } };
-	hint_row(right, y, h, back ? 2 : 1);
+	hint_row(right, y, h + !confirm, !!confirm + !!back);
 }
 
 // Cover art, or a blank Game Pak of the game's system at a whole-number scale.
@@ -426,7 +473,9 @@ static void draw_games(const struct player* p, float x, float y, float w, float 
 		hint(snap(x + (w - add_w) / 2), y + h / 2 + 4 * u, &tex_triangle, COL_BTN_TRIANGLE, add);
 		text_centered(x + w / 2, y + h / 2 + 8 * ts + 8 * u, ts, "OR COPY GAMES TO /dev_hdd0/ps3gba/roms", COL_DIM);
 		const struct hint_def legend[] = { { &tex_triangle, COL_BTN_TRIANGLE, "PHONE" }, { &tex_circle, COL_BTN_CIRCLE, "BACK" } };
-		hint_row(x + w - pad, y + h - pad - 8 * ts, legend, 2);
+		if (p->state == PS_GAMES && p->toast_frames == 0) {
+			hint_row(x + w - pad, y + h - pad - 8 * ts, legend, 2);
+		}
 		return;
 	}
 	// The carousel shows one catalog (system) at a time: the selected game's.
@@ -488,9 +537,13 @@ static void draw_games(const struct player* p, float x, float y, float w, float 
 	// L1/R1 only when there is another catalog to switch to.
 	const struct hint_def legend[] = {
 		{ &tex_shoulders, COL_BTN_PLAIN, "SYSTEM" }, { &tex_cross, COL_BTN_CROSS, "PICK" },
-		{ &tex_triangle, COL_BTN_TRIANGLE, "PHONE" }, { &tex_circle, COL_BTN_CIRCLE, "BACK" },
+		{ &tex_square, COL_BTN_SQUARE, "PATCH" }, { &tex_triangle, COL_BTN_TRIANGLE, "PHONE" },
+		{ &tex_circle, COL_BTN_CIRCLE, "BACK" },
 	};
-	hint_row(x + w - pad, legend_y, legend + (catalogs < 2), 4 - (catalogs < 2));
+	// Else a patching question covers the carousel, with its own, or a refusal's reason shows there.
+	if (p->state == PS_GAMES && p->toast_frames == 0) {
+		hint_row_in(x + pad, x + w - pad, legend_y, legend + (catalogs < 2), 5 - (catalogs < 2));
+	}
 }
 
 static void relative_time(time_t then, char* out, size_t len) {
@@ -502,29 +555,40 @@ static void relative_time(time_t then, char* out, size_t len) {
 	else snprintf(out, len, "%ldD AGO", ago / 86400);
 }
 
-// Centered box like the pause menu: a title in the player's color over rows with a cursor.
-static void menu_box(const struct player* p, float x, float y, float w, float h, const char* title,
+// Centered box like the pause menu: a title in the player's color, an optional text (`body`,
+// wrapped), then rows with a cursor (none: a message while something runs).
+static void menu_box(const struct player* p, float x, float y, float w, float h, const char* title, const char* body,
                      const char* const* labels, int n, int sel) {
 	u32 color = player_colors[p->index];
 	float inner = 6 * u, gap = 3 * u, cursor_w = tex_cursor.w * tm;
 	char t[80];
 	snprintf(t, sizeof(t), "%s", title);
-	int title_size = fit_text(t, tm, w - 2 * inner - 16 * u); // long names copied over FTP
-	float rows_w = 0;
+	int title_size = fit_text_min(t, tm, ts, w - 2 * inner - 16 * u); // long names copied over FTP
+	char lines[WRAP_LINES][WRAP_COLS];
+	int num_lines = body ? wrap(body, ts, fminf(w - 2 * inner - 16 * u, 36 * 8 * ts), lines) : 0;
+	float rows_w = 0, body_w = 0;
 	for (int i = 0; i < n; ++i) {
 		rows_w = fmaxf(rows_w, cursor_w + gap + gfx_text_width(labels[i], tm));
 	}
-	float row_h = 8 * tm + 4 * u;
-	float title_h = 8 * tm + 6 * u;
-	float bw = snap(2 * inner + fmaxf(rows_w, gfx_text_width(t, title_size)));
-	float bh = snap(2 * inner + title_h + n * row_h - 4 * u);
-	float bx = snap(x + (w - bw) / 2), by = snap(y + (h - bh) / 2);
+	for (int i = 0; i < num_lines; ++i) {
+		body_w = fmaxf(body_w, gfx_text_width(lines[i], ts));
+	}
+	float row_h = 8 * tm + 4 * u, line_h = 8 * ts + 3 * u;
+	float body_top = 8 * tm + 6 * u; // below the title
+	float rows_top = body_top + (num_lines ? num_lines * line_h - 3 * u + 6 * u : 0);
+	float bw = snap(2 * inner + fmaxf(fmaxf(rows_w, body_w), gfx_text_width(t, title_size)));
+	float bh = snap(2 * inner + (n ? rows_top + n * row_h - 4 * u : rows_top - 6 * u));
+	// Centered, but above the legend when that tall (a 2x2 slot at 720p).
+	float bx = snap(x + (w - bw) / 2), by = snap(fminf(y + (h - bh) / 2, y + h - 6 * u - 8 * ts - 4 * u - bh));
 	box(bx, by, bw, bh, COL_PANEL, color);
 	text_centered(bx + bw / 2, by + inner + (8 * tm - 8 * title_size) / 2, title_size, t, color);
+	for (int i = 0; i < num_lines; ++i) {
+		text_centered(bx + bw / 2, by + inner + body_top + i * line_h, ts, lines[i], COL_TEXT);
+	}
 	float rx = snap(bx + (bw - rows_w) / 2);
 	float shake = p->flash_frames > 0 ? ((p->flash_frames / 2) % 2 ? u : -u) : 0;
 	for (int i = 0; i < n; ++i) {
-		float ry = by + inner + title_h + i * row_h, dx = i == sel ? shake : 0;
+		float ry = by + inner + rows_top + i * row_h, dx = i == sel ? shake : 0;
 		if (i == sel) {
 			sprite(&tex_cursor, rx + dx, ry, tm, color); // 7 rows like the capitals (glyph row 8 is empty)
 		}
@@ -668,13 +732,13 @@ static void draw_saves(const struct player* p, float x, float y, float w, float 
 	float hy = y + h - pad - 8 * ts;
 	if (p->state == PS_SAVE_MENU) {
 		static const char* const labels[SAVE_MENU_COUNT] = { "RENAME", "COPY", "DELETE", "BACK" };
-		menu_box(p, x, y, w, h, p->op_save, labels, SAVE_MENU_COUNT, p->menu_sel);
+		menu_box(p, x, y, w, h, p->op_save, NULL, labels, SAVE_MENU_COUNT, p->menu_sel);
 		hints(x + w - pad, hy, "OK", "BACK");
 	} else if (p->state == PS_SAVE_DELETE) {
 		static const char* const labels[] = { "NO", "YES" };
 		char title[80];
 		snprintf(title, sizeof(title), "DELETE %s?", p->op_save);
-		menu_box(p, x, y, w, h, title, labels, 2, p->menu_sel);
+		menu_box(p, x, y, w, h, title, NULL, labels, 2, p->menu_sel);
 		hints(x + w - pad, hy, "OK", "BACK");
 	} else if (p->state == PS_SAVE_RENAME) {
 		draw_keyboard(p, x, y, w, h, frame);
@@ -683,7 +747,7 @@ static void draw_saves(const struct player* p, float x, float y, float w, float 
 			{ &tex_start, COL_BTN_PLAIN, "OK" }, { &tex_circle, COL_BTN_CIRCLE, "CANCEL" },
 		};
 		hint_row(x + w - pad, hy, h3, 4);
-	} else {
+	} else if (p->toast_frames == 0 || p->state != PS_SAVES) { // a refusal's reason shows there
 		// How to reach the pause menu, told before the game starts: in game it would cover it.
 		const struct hint_def pause = { &tex_sticks, COL_BTN_PLAIN, "PAUSE" };
 		hint_row(x + pad + hints_width(&pause, 1), hy, &pause, 1);
@@ -699,6 +763,162 @@ static void draw_saves(const struct player* p, float x, float y, float w, float 
 			hints(x + w - pad, hy, "PLAY", "BACK");
 		}
 	}
+}
+
+// ---------------------------------------------------------------------------------------------
+// ROM patching
+
+// The questions and messages of patching, in a box over the patch list or the carousel.
+static void draw_patch_box(const struct player* p, float x, float y, float w, float h, int frame, bool multi) {
+	float in = multi ? 2 * u : 0, pad = 6 * u, hy = y + h - pad - 8 * ts; // inside the slot's outline
+	gfx_rect(x + in, y + in, w - 2 * in, h - 2 * in, COL_SCRIM);
+	char title[160], body[320];
+	const struct patch_result* r = &p->patch_result;
+	const struct patch_info* patch = &p->patches[p->patch_sel];
+	int g = library_find(r->game), base = library_find(r->base);
+	switch (p->state) {
+	case PS_PATCH_CONFIRM: {
+		static const char* const labels[] = { "NO", "YES" };
+		snprintf(body, sizeof(body), "%.*s\nFROM %s\nAND %s%s", (int) (strrchr(patch->file, '.') - patch->file),
+		         patch->file, lib_games[p->game].title, patch->file,
+		         patch->fit == FIT_UNCHECKED ? "\n\nTHIS PATCH CAN'T BE CHECKED: MAKE SURE IT IS FOR THIS VERSION." : "");
+		menu_box(p, x, y, w, h, "CREATE THIS GAME?", body, labels, 2, p->menu_sel);
+		hints(x + w - pad, hy, "OK", "BACK");
+		break;
+	}
+	case PS_PATCH_BUSY: {
+		static const char* const steps[] = {
+			[STEP_READING] = "READING THE FILES", [STEP_PATCHING] = "APPLYING THE PATCH",
+			[STEP_WRITING] = "WRITING THE NEW GAME", [STEP_DELETING] = "", [STEP_DONE] = "",
+		};
+		static const char* const dots[] = { "   ", ".  ", ".. ", "..." };
+		snprintf(title, sizeof(title), "%s%s", p->patch_cleanup ? "DELETING" : "PATCHING", dots[frame / 15 % 4]);
+		const char* step = steps[rompatch_job_step(p->index)];
+		menu_box(p, x, y, w, h, title, step[0] ? step : NULL, NULL, 0, 0);
+		break;
+	}
+	case PS_PATCH_DONE: {
+		static const char* const labels[] = { "KEEP", "DELETE", "DELETE BOTH" };
+		// The name shortened rather than " IS READY" (menu_box truncates the end).
+		const char* name = g >= 0 ? lib_games[g].title : r->game;
+		int cols = (w - 28 * u) / (8 * ts) - 9, len = strlen(name);
+		snprintf(title, sizeof(title), len > cols ? "%.*s.. IS READY" : "%.*s IS READY", len > cols ? cols - 2 : len, name);
+		int n = snprintf(body, sizeof(body), "DELETE THE PATCH FILE? YOU WON'T BE ABLE TO REBUILD IT WITHOUT IT.");
+		if (r->base[0]) {
+			snprintf(body + n, sizeof(body) - n, "\nDELETE BOTH ALSO DELETES %.96s (NO SAVES).",
+			         base >= 0 ? lib_games[base].title : r->base);
+		}
+		menu_box(p, x, y, w, h, title, body, labels, r->base[0] ? 3 : 2, p->menu_sel);
+		hints(x + w - pad, hy, "OK", "KEEP");
+		break;
+	}
+	default: { // PS_PATCH_ERROR
+		static const char* const labels[] = { "OK" };
+		menu_box(p, x, y, w, h, p->patch_cleanup ? "CAN'T DELETE IT" : "CAN'T CREATE IT", r->error, labels, 1, 0);
+		hints(x + w - pad, hy, "OK", NULL);
+		break;
+	}
+	}
+}
+
+// The patches for the selected game, laid out like its saves: cover, then the list with a note
+// on the selected one below it.
+static void draw_patches(const struct player* p, float x, float y, float w, float h, int frame, bool multi) {
+	u32 color = player_colors[p->index];
+	float pad = 6 * u, hy = y + h - pad - 8 * ts;
+	const struct game* g = &lib_games[p->game];
+	header(p, x + pad, y + pad, "PATCH A GAME", x + w - pad);
+	if (p->state == PS_PATCHES && emu_anyone_playing()) {
+		char lines[WRAP_LINES][WRAP_COLS];
+		int n = wrap("ALL PLAYERS MUST QUIT\nTHEIR GAMES TO PATCH A ROM", tm, w - 2 * pad, lines);
+		for (int i = 0; i < n; ++i) {
+			text_centered(x + w / 2, y + (h - n * (8 * tm + 4 * u)) / 2 + i * (8 * tm + 4 * u), tm, lines[i], COL_TEXT);
+		}
+		hints(x + w - pad, hy, NULL, "BACK");
+		return;
+	}
+	float margin = 8 * u;
+	float top = y + pad + 8 * tm + 4 * u + margin;
+	float bottom = hy - margin;
+	float framed = snap(fminf(bottom - top, w * 0.34f));
+	float bx = x + margin, by = snap(top + (bottom - top - framed) / 2);
+	box(bx, by, framed, framed, color, COL_EDGE);
+	cover(g, bx + 2 * u, by + 2 * u, framed - 4 * u, 0xffffffff);
+
+	float lx = bx + framed + 6 * u, lw = x + w - margin - lx;
+	char title[96];
+	snprintf(title, sizeof(title), "%s", g->title);
+	int title_size = fit_text(title, ts, lw);
+	text(lx, by, title_size, title, COL_DIM);
+	float note_h = 8 * ts + 4 * u;
+	float list_top = by + 8 * title_size + 4 * u, list_h = by + framed - note_h - list_top;
+	box(lx, list_top, lw, list_h, COL_PANEL, COL_EDGE);
+	float row_h = 8 * tm + 6 * u, cx = lx + lw / 2;
+	if (p->num_patches <= 0) {
+		char lines[WRAP_LINES + 2][WRAP_COLS];
+		int n = 1;
+		snprintf(lines[0], WRAP_COLS, p->num_patches < 0 ? "CHECKING..." : "NO PATCH FOR THIS GAME");
+		if (p->num_patches == 0) {
+			n += wrap("ADD .IPS .UPS .BPS FILES FROM YOUR PHONE, OR COPY THEM TO", ts, lw - 8 * u, lines + 1);
+			snprintf(lines[n++], WRAP_COLS, "%s", PATCH_DIR); // one line, smaller if need be
+		}
+		float line_h = 8 * ts + 3 * u, ty = snap(list_top + (list_h - n * line_h) / 2);
+		for (int i = 0; i < n; ++i) {
+			int size = fit_text(lines[i], ts, lw - 8 * u);
+			text_centered(cx, ty + i * line_h, size, lines[i], i == 0 ? COL_TEXT : COL_DIM);
+		}
+	}
+	int visible = (list_h - 4 * u) / row_h;
+	if (visible < 1) visible = 1;
+	int first = p->patch_sel - visible + 1;
+	if (first < 0) first = 0;
+	for (int r = first; r < p->num_patches && r < first + visible; ++r) {
+		const struct patch_info* patch = &p->patches[r];
+		float ry = list_top + 2 * u + (r - first) * row_h, ty = ry + 3 * u;
+		bool sel = r == p->patch_sel, faint = patch->fit == FIT_OTHER || patch->fit == FIT_BUILT;
+		float shake = sel && p->flash_frames > 0 ? ((p->flash_frames / 2) % 2 ? u : -u) : 0;
+		float tx = lx + 4 * u + tex_cursor.w * tm + 3 * u + shake;
+		if (sel) {
+			gfx_rect(lx + u, ry, lw - 2 * u, row_h, with_alpha(color, 0x38));
+			sprite(&tex_cursor, lx + 3 * u + shake, ty + u, tm, color);
+		}
+		float fw = gfx_text_width(patch->format, ts), fx = lx + lw - 4 * u - fw;
+		text(fx, ty + (8 * tm - 8 * ts) / 2, ts, patch->format, faint ? COL_FAINT : COL_DIM);
+		char name[256];
+		snprintf(name, sizeof(name), "%.*s", (int) (strrchr(patch->file, '.') - patch->file), patch->file);
+		int size = fit_text_min(name, tm, ts, fx - 4 * u - tx); // long names truncated, never tiny
+		text(tx, ty + (8 * tm - 8 * size) / 2, size, name, sel ? (faint ? COL_DIM : COL_TEXT) : faint ? COL_FAINT : COL_DIM);
+	}
+	if (p->num_patches > 0) {
+		// Short enough for the list's width in a 2x2 slot at 720p.
+		static const char* const notes[] = {
+			[FIT_OK] = "FOR THIS VERSION", [FIT_UNCHECKED] = "VERSION NOT CHECKED",
+			[FIT_OTHER] = "FOR ANOTHER VERSION", [FIT_BUILT] = "ALREADY BUILT",
+		};
+		int fit = p->patches[p->patch_sel].fit;
+		char note[64];
+		snprintf(note, sizeof(note), "%s", notes[fit]);
+		int size = fit_text_min(note, ts, ts, lw);
+		text(lx, by + framed - 8 * size, size, note, fit == FIT_OK ? COL_DIM : fit == FIT_BUILT ? COL_DIM : COL_WARN);
+	}
+	if (p->state != PS_PATCHES) {
+		draw_patch_box(p, x, y, w, h, frame, multi);
+	} else if (p->num_patches > 0 && !emu_anyone_playing()) {
+		hints(x + w - pad, hy, "CREATE", "BACK");
+	} else {
+		hints(x + w - pad, hy, NULL, "BACK");
+	}
+}
+
+// A refusal's reason (struct player.toast) in place of the legend for a few seconds.
+static void draw_toast(const struct player* p, float x, float y, float w, float h) {
+	char s[48];
+	snprintf(s, sizeof(s), "%s", p->toast);
+	int size = fit_text(s, ts, w - 28 * u);
+	float bw = gfx_text_width(s, size) + 8 * u, bh = 8 * size + 6 * u;
+	float bx = snap(x + (w - bw) / 2), by = snap(y + h - 6 * u - 8 * ts - 3 * u); // on the legend's row
+	box(bx, by, bw, bh, COL_PANEL, COL_WARN);
+	text(bx + 4 * u, by + 3 * u, size, s, COL_WARN);
 }
 
 // Whole screen pixels per QR module (whole art pixels when big enough, at most 3) for a code
@@ -866,6 +1086,19 @@ void ui_draw_slot(const struct player* p, float x, float y, float w, float h, in
 	case PS_PHONE:
 		draw_phone(p, x, y, w, h);
 		break;
+	case PS_PATCHES:
+	case PS_PATCH_CONFIRM:
+	case PS_PATCH_ERROR:
+	case PS_PATCH_BUSY:
+	case PS_PATCH_DONE:
+		// Once built, the questions show over the carousel, on the new game.
+		if (p->state == PS_PATCH_DONE || p->patch_cleanup) {
+			draw_games(p, x, y, w, h, frame);
+			draw_patch_box(p, x, y, w, h, frame, multi);
+		} else {
+			draw_patches(p, x, y, w, h, frame, multi);
+		}
+		break;
 	case PS_PLAYING:
 		draw_game(p, x, y, w, h, false, multi);
 		break;
@@ -873,6 +1106,9 @@ void ui_draw_slot(const struct player* p, float x, float y, float w, float h, in
 		draw_game(p, x, y, w, h, true, multi);
 		draw_pause(p, x, y, w, h, show_perf);
 		break;
+	}
+	if (p->toast_frames > 0 && (p->state == PS_GAMES || p->state == PS_SAVES)) {
+		draw_toast(p, x, y, w, h);
 	}
 	if (show_perf && p->core) {
 		draw_perf(p, x + 4 * u, y + h - 4 * u - 8 * ts);

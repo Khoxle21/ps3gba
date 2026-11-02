@@ -1,0 +1,140 @@
+mGBA's ROM patch code (IPS, UPS, BPS) read its numbers as little-endian into native integers: on
+a big-endian host (the PS3) every UPS and BPS checksum mismatched (no patch loaded) and IPS
+offsets, sizes and its end marker were misread. Fields are now read in their file's byte order.
+The IPS output size is also the input grown to the furthest record instead of always 16 MiB,
+which cut 32 MiB ROMs short and padded small ones (ps3gba writes the result to a file).
+Tested by tools/patch_test.sh on a little- and a big-endian CPU.
+
+diff --git a/src/util/patch-ips.c b/src/util/patch-ips.c
+index 63fed6a84..e279d717f 100644
+--- a/src/util/patch-ips.c
++++ b/src/util/patch-ips.c
+@@ -8,6 +8,8 @@
+ #include <mgba-util/patch.h>
+ #include <mgba-util/vfs.h>
+ 
++#define IPS_EOF 0x454F46 // "EOF" read as an offset
++
+ static size_t _IPSOutputSize(struct Patch* patch, size_t inSize);
+ static bool _IPSApplyPatch(struct Patch* patch, const void* restrict in, size_t inSize, void* restrict out, size_t outSize);
+ 
+@@ -37,10 +39,40 @@ bool loadPatchIPS(struct Patch* patch) {
+ 	return true;
+ }
+ 
++// Fields are big-endian: read them bytewise, so that big-endian hosts read them too.
++static bool _readBE(struct VFile* vf, int bytes, uint32_t* value) {
++	uint8_t buffer[3];
++	if (vf->read(vf, buffer, bytes) != bytes) {
++		return false;
++	}
++	*value = 0;
++	int i;
++	for (i = 0; i < bytes; ++i) {
++		*value = *value << 8 | buffer[i];
++	}
++	return true;
++}
++
++// The input grown to the end of the furthest record: IPS offsets stop at 16MiB, so larger ROMs
++// keep their size.
+ size_t _IPSOutputSize(struct Patch* patch, size_t inSize) {
+-	UNUSED(patch);
+-	UNUSED(inSize);
+-	return 16 * 1024 * 1024; // IPS patches can grow up to 16MiB, but not beyond
++	if (patch->vf->seek(patch->vf, 5, SEEK_SET) != 5) {
++		return 0;
++	}
++	size_t outSize = inSize;
++	uint32_t offset = 0;
++	uint32_t size;
++	while (_readBE(patch->vf, 3, &offset) && offset != IPS_EOF && _readBE(patch->vf, 2, &size)) {
++		if (size) {
++			patch->vf->seek(patch->vf, size, SEEK_CUR);
++		} else if (!_readBE(patch->vf, 2, &size) || patch->vf->seek(patch->vf, 1, SEEK_CUR) < 0) {
++			return 0;
++		}
++		if (offset + size > outSize) {
++			outSize = offset + size;
++		}
++	}
++	return offset == IPS_EOF ? outSize : 0;
+ }
+ 
+ bool _IPSApplyPatch(struct Patch* patch, const void* restrict in, size_t inSize, void* restrict out, size_t outSize) {
+@@ -51,27 +83,24 @@ bool _IPSApplyPatch(struct Patch* patch, const void* restrict in, size_t inSize,
+ 	uint8_t* buf = out;
+ 
+ 	while (true) {
+-		uint32_t offset = 0;
+-		uint16_t size = 0;
+-
+-		if (patch->vf->read(patch->vf, &offset, 3) != 3) {
++		uint32_t offset;
++		uint32_t size;
++		if (!_readBE(patch->vf, 3, &offset)) {
+ 			return false;
+ 		}
+ 
+-		if (offset == 0x464F45) {
++		if (offset == IPS_EOF) {
+ 			return true;
+ 		}
+ 
+-		offset = (offset >> 16) | (offset & 0xFF00) | ((offset << 16) & 0xFF0000);
+-		if (patch->vf->read(patch->vf, &size, 2) != 2) {
++		if (!_readBE(patch->vf, 2, &size)) {
+ 			return false;
+ 		}
+ 		if (!size) {
+ 			// RLE chunk
+-			if (patch->vf->read(patch->vf, &size, 2) != 2) {
++			if (!_readBE(patch->vf, 2, &size)) {
+ 				return false;
+ 			}
+-			size = (size >> 8) | (size << 8);
+ 			uint8_t byte;
+ 			if (patch->vf->read(patch->vf, &byte, 1) != 1) {
+ 				return false;
+@@ -81,11 +110,10 @@ bool _IPSApplyPatch(struct Patch* patch, const void* restrict in, size_t inSize,
+ 			}
+ 			memset(&buf[offset], byte, size);
+ 		} else {
+-			size = (size >> 8) | (size << 8);
+ 			if (offset + size > outSize) {
+ 				return false;
+ 			}
+-			if (patch->vf->read(patch->vf, &buf[offset], size) != size) {
++			if (patch->vf->read(patch->vf, &buf[offset], size) != (ssize_t) size) {
+ 				return false;
+ 			}
+ 		}
+diff --git a/src/util/patch-ups.c b/src/util/patch-ups.c
+index ff9885f69..445040921 100644
+--- a/src/util/patch-ups.c
++++ b/src/util/patch-ups.c
+@@ -48,6 +48,7 @@ bool loadPatchUPS(struct Patch* patch) {
+ 	if (patch->vf->read(patch->vf, &goodCrc32, 4) != 4) {
+ 		return false;
+ 	}
++	LOAD_32LE(goodCrc32, 0, &goodCrc32); // little-endian in the file
+ 
+ 	uint32_t crc = fileCrc32(patch->vf, filesize + PATCH_CHECKSUM);
+ 	if (crc != goodCrc32) {
+@@ -123,6 +124,7 @@ bool _UPSApplyPatch(struct Patch* patch, const void* restrict in, size_t inSize,
+ 	if (patch->vf->read(patch->vf, &goodCrc32, 4) != 4) {
+ 		return false;
+ 	}
++	LOAD_32LE(goodCrc32, 0, &goodCrc32); // little-endian in the file
+ 
+ 	patch->vf->seek(patch->vf, 0, SEEK_SET);
+ 	if (doCrc32(out, outSize) != goodCrc32) {
+@@ -137,6 +139,8 @@ bool _BPSApplyPatch(struct Patch* patch, const void* restrict in, size_t inSize,
+ 	uint32_t expectedOutChecksum;
+ 	patch->vf->read(patch->vf, &expectedInChecksum, sizeof(expectedInChecksum));
+ 	patch->vf->read(patch->vf, &expectedOutChecksum, sizeof(expectedOutChecksum));
++	LOAD_32LE(expectedInChecksum, 0, &expectedInChecksum); // little-endian in the file
++	LOAD_32LE(expectedOutChecksum, 0, &expectedOutChecksum);
+ 
+ 	uint32_t inputChecksum = doCrc32(in, inSize);
+ 	uint32_t outputChecksum = 0;

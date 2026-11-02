@@ -28,6 +28,8 @@ void emu_link_set(struct player* p, bool on);
 void emu_wireless_set(struct player* p, bool on);
 // Player currently using this save, or -1.
 int emu_save_owner(const char* game_file, const char* save);
+// Someone is in a game (loading, playing or paused): no ROM patching then.
+bool emu_anyone_playing(void);
 
 #include <stdio.h>
 

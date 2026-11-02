@@ -32,6 +32,7 @@
 #include "library.h"
 #include "phone_html.h"
 #include "pressstart2p_ttf.h"
+#include "rompatch.h"
 #include "web.h"
 
 #define WEB_PRIORITY 1300 // below the emulators (1200): a transfer must never cost a frame
@@ -44,7 +45,6 @@
 #define COVER_MAX (2 << 20)  // the page sends covers already shrunk to 256 px
 #define ROM_NAME_MAX 128
 #define SAVE_NAME_MAX 16     // what fits a save list row
-#define TMP_DIR DATA_DIR "/tmp" // uploads land here, then move into place whole
 #define GB_ROM_DIR ROM_DIR "/gb" // GB/GBC uploads, apart from the GBA games
 
 char web_urls[MAX_PLAYERS][64];
@@ -349,6 +349,12 @@ static bool read_start(const char* path, u8* head, size_t len) {
 	return ok;
 }
 
+// Its first bytes are an IPS, UPS or BPS patch's.
+static bool is_patch(const char* path) {
+	u8 head[5];
+	return read_start(path, head, sizeof(head)) && rompatch_format(head);
+}
+
 // mGBA's own check, on the header (GB/GBC: the logo at 0x104).
 static bool is_rom(const char* path, enum game_system system) {
 	u8 head[0x200];
@@ -527,6 +533,58 @@ static void post_rom(struct conn* c, const char* query) {
 	reply(c, 200, "ADDED %s", name);
 }
 
+// Patches go to PATCH_DIR under their own name; the player then builds the game on the TV.
+static void post_patch(struct conn* c, const char* query) {
+	char name[256], path[512], tmp[128];
+	if (!param(query, "name", name, sizeof(name)) || !rompatch_is_patch_file(name)) {
+		drain(c);
+		reply(c, 400, "ONLY .IPS .UPS .BPS FILES");
+		return;
+	}
+	char* dot = strrchr(name, '.');
+	for (char* s = dot; *s; ++s) {
+		*s = tolower((unsigned char) *s);
+	}
+	*dot = '\0'; // checked without its extension
+	bool ok = valid_name(name, ROM_NAME_MAX, false);
+	*dot = '.';
+	if (!ok) {
+		drain(c);
+		reply(c, 400, "BAD FILE NAME");
+		return;
+	}
+	if (c->length < 8 || c->length > ROM_MAX) {
+		drain(c);
+		reply(c, 413, "NOT A PATCH (32 MB AT MOST)");
+		return;
+	}
+	snprintf(path, sizeof(path), "%s/%s", PATCH_DIR, name);
+	if (exists(path)) {
+		drain(c);
+		reply(c, 409, "ALREADY ON THE PS3");
+		return;
+	}
+	if (!receive(c, tmp, sizeof(tmp))) {
+		reply(c, 500, "UPLOAD FAILED");
+		return;
+	}
+	if (!is_patch(tmp)) {
+		remove(tmp);
+		reply(c, 415, "NOT AN IPS, UPS OR BPS PATCH");
+		return;
+	}
+	sysMutexLock(place_lock, 0);
+	ok = place(tmp, path);
+	sysMutexUnlock(place_lock);
+	if (!ok) {
+		remove(tmp);
+		reply(c, 409, "ALREADY ON THE PS3");
+		return;
+	}
+	log_printf("web: P%d added patch %s\n", c->player + 1, name);
+	reply(c, 200, "ADDED %s: PRESS SQUARE ON ITS GAME ON THE TV", name);
+}
+
 static void post_cover(struct conn* c, const char* query) {
 	char game[256], path[512], tmp[128];
 	if (!game_param(query, game, sizeof(game))) {
@@ -681,6 +739,8 @@ static void handle(struct conn* c) {
 		get_cover(c, query);
 	} else if (post && strcmp(route, "rom") == 0) {
 		post_rom(c, query);
+	} else if (post && strcmp(route, "patch") == 0) {
+		post_patch(c, query);
 	} else if (post && strcmp(route, "cover") == 0) {
 		post_cover(c, query);
 	} else if (post && strcmp(route, "save") == 0) {
@@ -871,7 +931,7 @@ static void take_rescan(void) {
 			p->game = g;
 		} else {
 			p->game = 0; // never picked one, or it is gone (deleted over FTP)
-			if (p->state == PS_SAVES) p->state = PS_GAMES;
+			if (p->state == PS_SAVES || p->state == PS_PATCHES || p->state == PS_PATCH_CONFIRM) p->state = PS_GAMES;
 		}
 	}
 }
