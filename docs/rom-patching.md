@@ -67,6 +67,9 @@ Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't cha
 - **With real files** (kept out of the repo): a ROM and a BPS hack or translation patch for it,
   in RPCS3 then on the console: list, wrong-version refusal, build, play, save, rescan; the
   "nobody playing" refusal with a game running; a phone upload of a patch.
+- **A chain**: a hack built from a ROM by a UPS patch, then a translation BPS made for that hack:
+  the translation must show up on the newly built game (its checksum is the hack's result
+  checksum), not on the original ROM. Large outputs too: a 16 MB ROM patched into 32 MB.
 - UI at 1080p and 720p (`RES=1280x720`), in a single slot and in 2x2.
 
 ## Done means
