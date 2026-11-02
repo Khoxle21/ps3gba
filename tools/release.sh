@@ -16,7 +16,8 @@ git fetch -q origin main
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
 	echo "$tag exists already: bump the version in CHANGELOG.md" >&2; exit 1
 fi
-gh auth status >/dev/null 2>&1 || { echo "gh is not logged in: gh auth login" >&2; exit 1; }
+login=$(gh api user --jq .login 2>/dev/null) || { echo "gh is not logged in: gh auth login" >&2; exit 1; }
+[ "$login" = "${repo%%/*}" ] || { echo "gh is logged in as $login, not ${repo%%/*}: gh auth switch" >&2; exit 1; }
 
 # The release build (no dev tools), named after the version.
 rm -f ps3gba.pkg ps3gba.gnpdrm.pkg
