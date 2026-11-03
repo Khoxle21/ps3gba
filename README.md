@@ -3,6 +3,8 @@
 **Play Game Boy Advance games on a PS3, up to 4 players at once on the same TV.**
 Developed by Khoxle.
 
+![Four players, four games: Pokemon FireRed, Emerald, Crystal and Unbound](docs/screenshots/four-players.png)
+
 ps3gba turns a modded PlayStation 3 into a 4-player Game Boy Advance emulator. The screen splits in
 up to four, each player gets their own controller, game and save, and the consoles can be linked
 with a virtual link cable or Wireless Adapter to trade and battle, like with real GBAs back in the
@@ -25,6 +27,19 @@ No games are included: use dumps of the cartridges you own.
   automatically.
 - A pixel-art menu with music, a 60 fps display, and the sound of player 1's game (or of the
   first player in a game).
+
+## Screenshots
+
+| | |
+|---|---|
+| ![The welcome screen](docs/screenshots/welcome.png) | ![Four players choose their games, GBA and Game Boy Color](docs/screenshots/game-selection.png) |
+| The welcome screen | Each player picks a game, from GBA, Game Boy Color and Game Boy shelves |
+| ![Four FireReds in the Union Room over the Wireless Adapter](docs/screenshots/union-room.png) | ![Turning the Wireless Adapter on from the pause menu](docs/screenshots/pause-menu.png) |
+| Four players meet in FireRed's Union Room over the Wireless Adapter | The pause menu: link cable or Wireless Adapter |
+| ![Building Pokemon Unbound from FireRed and its patch](docs/screenshots/rom-patching.png) | ![The new game is ready: keep or delete its patch](docs/screenshots/rom-patching-done.png) |
+| A hack built on the PS3 from FireRed and its patch | Built in seconds; then the patch file can go |
+
+Taken in the [RPCS3](https://rpcs3.net) emulator at 1080p.
 
 ## What you need
 
