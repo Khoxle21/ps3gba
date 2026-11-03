@@ -18,8 +18,9 @@ can cost a console's drive.
 - [docs/jit.md](docs/jit.md): the ARM/Thumb to PowerPC JIT's design, exactness and self-check.
 - [docs/performance-plan.md](docs/performance-plan.md): how 4 players reached 60 fps, with every
   measurement.
-- [docs/rom-patching.md](docs/rom-patching.md), [docs/wireless-adapter.md](docs/wireless-adapter.md):
-  plans of features in progress.
+- [docs/wireless-adapter.md](docs/wireless-adapter.md): the GBA Wireless Adapter's emulation
+  (protocol, design, tests).
+- [docs/rom-patching.md](docs/rom-patching.md): plan of a feature in progress.
 - Coding agents: link this file as the agent's instructions (e.g. `ln -s CONTRIBUTING.md
   CLAUDE.md` for Claude Code; `CLAUDE.md` is gitignored) and keep personal notes (your consoles,
   preferences) in `CLAUDE.local.md`, also gitignored.
@@ -111,6 +112,12 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   `LINK_CABLES=0|1|2` (no cable, one, two 2-player cables), `TIMES=1` (a `time P<n>` line: the
   JIT run loop's split into translated code, mGBA events, interpreter and dispatch; costs ~1%).
 - UI changes: check them at 1080p and 720p (`RES=1280x720`), with screenshots.
+- Wireless Adapter: `tools/rfu_test.sh <script> <rom> <save> [<rom> <save>...]` runs 2-4 mGBA
+  cores with `source/rfu.c`'s adapter on the Mac (toolchain container), from a script
+  (`tests/rfu/harness.c`), with screenshots and each game's save at the end;
+  `tests/rfu/trade.txt` (two FireReds trade in the Union Room) and `trade4.txt` (four, two trades).
+  `tools/save_trainer.py` copies a Gen 3 save as another trainer (the Union Room needs distinct
+  ones). See [docs/wireless-adapter.md](docs/wireless-adapter.md).
 
 ## Dev builds
 
@@ -122,7 +129,9 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   afterwards; CHECK runs both and logs frames that differ), `<player> GAME <text>` (moves the
   player's carousel to the first game whose file name contains the text, switching to its
   system's catalog: scripts must not count presses in the carousel, its order changes with the
-  library), `<player> LINK ON|OFF` (the pause menu's cable switch, for a running GBA game),
+  library), `<player> HOLD <button> <frames>` (a longer press, e.g. to walk), `<player> LINK
+  ON|OFF` (the pause menu's cable switch, for a running GBA game), `<player> WIRELESS ON|OFF` (its
+  Wireless Adapter switch),
   `INTRO <frame> [<frames since Start>]` (holds one frame of the welcome screen, for
   screenshots), `FRAME <n>` (draws the UI's animations as at frame n, -1 for live: pixel diffs of
   two builds), `MENU` (opens the main menu; player commands then drive the menus instead of
@@ -165,6 +174,11 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   games on its cable ("favored") run at thread priority 1199 instead of 1200 and are the only
   ones the main loop waits for; frames are triple-buffered so the others can run late.
   `source/soundcheck.c`: the dev self-check of skipped samples.
+- `source/rfu.c` + `include/rfu.h`: the GBA Wireless Adapter, one per player (`emu_wireless_set`
+  from the pause menu, plugged in on the player's thread like the cable, exclusive with it): an
+  mGBA SIO driver timing its own Normal 32-bit transfers, and a hub shared by the emulation
+  threads as the radio (packet queues, never blocking). Protocol and design:
+  `docs/wireless-adapter.md`.
 - `source/spu_render.c` + `spu/render.c` + `include/spu_render.h`: mGBA's renderer on one SPU per
   player, fed by its proxy renderer's packet stream (falls back to the PPU renderer).
 - `source/jit/` ARM/Thumb to PowerPC JIT (design: `docs/jit.md`): on unless
@@ -239,5 +253,7 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   switch and the drawing counters still to check on the console.
 - Todo: the manual's URL for Help's QR code (`MANUAL_URL`, top of `source/ui.c`) is a placeholder.
 - Next: 3-4 player UI polish, trades and battles tested with several cables.
-- Planned: ROM patching ([docs/rom-patching.md](docs/rom-patching.md)) and the GBA Wireless
-  Adapter ([docs/wireless-adapter.md](docs/wireless-adapter.md)), each in its own branch.
+- GBA Wireless Adapter: FireRed Union Room trades on the CFW console, 2 and 4 players at 60 fps;
+  Unbound closed its Union Room (no wireless trades there). Battles, chat and LeafGreen not tried
+  ([docs/wireless-adapter.md](docs/wireless-adapter.md)).
+- Planned: ROM patching ([docs/rom-patching.md](docs/rom-patching.md)), in its own branch.

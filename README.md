@@ -5,7 +5,8 @@ Developed by Khoxle.
 
 ps3gba turns a modded PlayStation 3 into a 4-player Game Boy Advance emulator. The screen splits in
 up to four, each player gets their own controller, game and save, and the consoles can be linked
-with a virtual link cable to trade and battle, like with real GBAs and cables back in the day.
+with a virtual link cable or Wireless Adapter to trade and battle, like with real GBAs back in the
+day.
 Game Boy and Game Boy Color games work too.
 
 No games are included: use dumps of the cartridges you own.
@@ -13,7 +14,9 @@ No games are included: use dumps of the cartridges you own.
 ## What you can do
 
 - Up to 4 players side by side, each in their own game (or the same one).
-- Link the games together from the pause menu to trade or battle.
+- Link the games together from the pause menu to trade or battle: with the link cable, or with the
+  GBA Wireless Adapter for games that use it, such as the Union Room of Pokemon FireRed (up to 4
+  players).
 - Manage saves: several per game, rename, copy, delete.
 - Add games, covers and saves from your phone: each player scans a QR code and gets a small web
   page, working only on the same network as the PS3. Missing box art is fetched automatically.
@@ -39,8 +42,8 @@ No games are included: use dumps of the cartridges you own.
 3. Start ps3gba from the XMB, press Start, choose PLAY. Each player presses Start on their
    controller to join, picks a game and a save.
 
-In game: Cross is A, Circle is B, L3 or R3 opens the pause menu (resume, quit, link cable, frame
-rate). Every menu shows which buttons do what at the bottom.
+In game: Cross is A, Circle is B, L3 or R3 opens the pause menu (resume, quit, link cable,
+wireless adapter, frame rate). Every menu shows which buttons do what at the bottom.
 
 ## How it works, in short
 

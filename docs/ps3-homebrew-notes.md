@@ -288,6 +288,11 @@ Dockerfile). Verify with `ppu-objdump -d` that no `std`/`stdx` remains in hot pa
   A paused game keeps running while anyone plays (`is_running`), so plugged GBAs all run or all
   stop and none waits on a stopped peer. Unplugging during a link session gives the games' own
   "communication error" screen, like a real cable.
+- **The GBA Wireless Adapter is an SIO driver that never blocks** (`source/rfu.c`,
+  `docs/wireless-adapter.md`): no lockstep, packets queued between the emulation threads through
+  a hub under an lv2 mutex, a waiting adapter polling a volatile stamp every ~1 ms of emulated
+  time. On the CFW console (2026-11-03) it behaved exactly as in the desktop harness: 2 and 4
+  FireReds traded in the Union Room at 60 fps, emulation cost unchanged.
 - Pokemon keeps the link port in multiplayer mode from the title screen on, so its cable is
   effectively always active: ~70 sleep/wake syncs per frame between the emulator threads. Hence
   games start unplugged (pause menu: LINK CABLE).

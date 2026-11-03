@@ -1,109 +1,99 @@
-# GBA Wireless Adapter: research and plan
+# GBA Wireless Adapter
 
-Status: research only (2026-11-02), nothing implemented. Goal: trade (and battle) in games that
-only link wirelessly, Pokemon Unbound first, between the players of one ps3gba session.
+The GBA Wireless Adapter (AGB-015), emulated for every player's GBA game, so the games link
+without a cable: Pokemon FireRed's Union Room (trades, greetings) works between the players of one
+ps3gba session, up to 4 at once.
 
-## Why
+## Status (2026-11-03)
 
-- Pokemon FireRed/LeafGreen and Emerald reach the Union Room (trade, battle, chat with up to 4
-  others) only with the Wireless Adapter (AGB-015) plugged in; Pokemon Unbound, built on FireRed,
-  trades that way. Our emulated link cable doesn't help there.
-- The adapter supports 1 host and up to 4 clients: our 4 players fit.
+- **Works on the CFW console**: two FireReds traded in the Union Room (trading board), then four
+  players in the room with two trades, the saves checked after each; 59.9-60 fps throughout,
+  ~5-6 ms of emulation per player. `tools/bench.sh 4` (the cable) unchanged: 59.9 fps, 60/60
+  frames per player.
+- Desktop harness: the same trades with 2 and 4 players, also with games stalling at random (a
+  late emulation thread), and the Union Room's trainer card exchange.
+- **Pokemon Unbound (2.1.1.1) can't trade over it**: the game detects the adapter, but its own
+  scripts closed the Union Room and link trading ("the Union Room is no longer available",
+  "trading is no longer available from the Cable Club. Please use Unbound Cloud"), the cable too.
+- Not tried: battles and chat in the Union Room, the Direct Corner over the adapter, LeafGreen,
+  Emerald, HEN, other wireless games (wireless multiboot isn't implemented).
 
-## The device
+## Using it
 
-- An SPI peripheral on the GBA's serial port, in Normal 32-bit mode. It starts with a login
-  handshake: both sides exchange the letters of "NINTENDO", each half-word answered with the
-  inverse of the other side's previous one. Then the game sends commands as
-  32-bit words: a header `0x9966LLCC` (`LL` data words follow, `CC` the command), the adapter
-  acknowledges with `0x996600(CC + 0x80)` and its own data words.
-- Commands (afska's docs list them all): Hello `0x10`, Setup `0x17`, Broadcast `0x16` (the host
-  advertises 6 words), StartHost `0x19`, PollConnections `0x1a`, BroadcastRead `0x1c-0x1e`
-  (clients scan), Connect `0x1f`, IsConnectionComplete `0x20`, FinishConnection `0x21`,
-  SendData `0x24`, SendDataWait `0x25`, ReceiveData `0x26`, Wait `0x27`, DisconnectClient
-  `0x30`, Bye `0x3d`, plus status commands (`0x11-0x15`) and RetransmitAndWait `0x37`.
-- "Wait" commands reverse the roles: the adapter becomes the clock master and sends a word to
-  the GBA when data arrives or a timeout passes (the serial interrupt wakes the game).
-- Packets are small (the host sends up to ~87 bytes per transfer, each client up to 16), and the
-  games' library (Nintendo's librfu, visible in the pret decompilations of FireRed and Emerald)
-  counts timeouts in frames.
+- Pause menu of a GBA game: WIRELESS ADAPTER: ON/OFF. One port: turning it on unplugs the link
+  cable, and the other way round. Games start with neither.
+- Plug it in before talking to the Union Room attendant (FireRed checks for it there; also at
+  boot, harmlessly).
+- In the Union Room each player needs their own trainer: the game takes two players with the same
+  name and trainer ID for one (two copies of one save still trade; with 3-4 such copies the
+  trading board showed nothing). `tools/save_trainer.py` copies a save as another trainer.
+- Trades go through the trading board: one player registers a Pokemon with the attendant beside
+  it, the other checks the board, picks the offer and offers a Pokemon of the wanted type.
 
-## Existing implementations
+## The device (what the emulation follows)
 
-| Project | License | State |
-|---|---|---|
-| VBA-M (`src/core/gba/gbaLink.cpp`) | GPL-2.0 | Works for the Pokemon games: over a thousand lines of adapter emulation, between instances on one PC (IPC) or over a network (sockets). Maintained in 2026 (link fixes through October), with an Emerald trade/battle test harness that takes `--link rfu`. |
-| GBE+ | GPL-2.0 | Partial: menus reachable, multiplayer not working (its release notes). |
-| mGBA | MPL-2.0 | None (no wireless code in our snapshot of 2026-10-30). |
-| [afska/gba-link-connection](https://github.com/afska/gba-link-connection) | MIT | Not an emulator: the best protocol documentation (`docs/wireless_adapter.md`, every command, waiting, wireless multiboot, credits davidgfnet and kuiper.dev) and a library driving a real adapter. |
-| denopqrihg's spec v1.1 (2005) | - | Older, partial command list. |
+Sources: [afska/gba-link-connection](https://github.com/afska/gba-link-connection)'s
+`docs/wireless_adapter.md` (MIT, every command) and what the games' own library sends and expects
+(Nintendo's librfu, in pret's FireRed decompilation: `librfu_stwi.c`, `librfu_intr.c`,
+`librfu_sio32id.c`, `librfu_rfu.c`). No code from VBA-M (GPL-2.0, the other emulation of it).
 
-**License**: copying VBA-M's code would make ps3gba as a whole GPL-2.0. Recommended: write our
-adapter from afska's MIT documentation and the games' own library (decompilations), and use VBA-M
-only as a behavior reference and test oracle (run the same scenario there and compare the serial
-transcripts), not as code to copy. That keeps ps3gba under MPL-2.0.
+- An SPI device on the serial port in Normal 32-bit mode: each transfer swaps one word each way,
+  so the adapter's word for a transfer is decided by the previous one.
+- Reset: the game holds SD high in GPIO mode (`RCNT` 0x80A2), then both sides swap the letters of
+  "NINTENDO". The adapter's side is the slave half of librfu's own `Sio32IDIntr`, one word late;
+  once the GBA echoed the adapter's id (0x8001) the adapter answers 0x80000000 (else the game's
+  first command fails and is retried 130 ms later).
+- Commands: `0x9966LLCC` and LL words, answered `0x9966LL(CC+0x80)` and its words; 0x80000000 is
+  "nothing to say" both ways. Between words the GBA waits for SI to answer SO: SI is the opposite
+  of SO while the GBA clocks, equal to SO while the adapter clocks; we answer at once.
+- After a "wait" command (0x25 send and wait, 0x27 wait, 0x37 retransmit and wait; 0x35 too) the
+  GBA becomes the clock slave until the adapter clocks a request to it: 0x28 data arrived (a host
+  gets it right after its own send-and-wait, with every client acked), 0x29 and the lost slot and
+  reason (a client lost its host), 0x27 the Setup timeout (frames, 32 in FireRed). The GBA acks
+  with CC+0x80; then it is the master again.
+- Replies the games parse (librfu): SystemStatus 0x13 (id, a client's slot bit, state at bits
+  24-31: 0 idle, 1-2 host, 3 searching, 4 connecting, 5 connected); host poll 0x1a (`id | slot <<
+  16` per client); scan 0x1d/0x1e (per open room: `id | next free slot << 16`, then its 6
+  broadcast words); connect poll 0x20/0x21 (`id | slot << 16` when connected, status at bits
+  24-31 else: 0 is success, anything else "still trying" then failure); LinkStatus 0x11 (signal
+  per slot: FireRed's librfu 1024 only takes a client after 4 host polls with its signal on).
+- Data: a host sends up to 87 bytes (header: byte count), a client 16 (header: count << (8 + 5 *
+  slot)); bytes go least significant first in each word. A host's receive has one 5-bit count per
+  slot from bit 8 and the bytes end to end; a client's the host's count in bits 0-6. A header
+  alone ("ghost send") resends a few bytes; games use one to let clients talk.
 
 ## How it fits ps3gba
 
-- **No mGBA patch**: mGBA attaches accessories through `struct GBASIODriver`
-  (`include/mgba/gba/interface.h`): `writeSIOCNT`, `start` and `finishNormal32` cover an SPI
-  device in Normal 32-bit mode, as mGBA's own BattleChip Gate driver does. One virtual adapter
-  per player, in our code (e.g. `source/rfu.c`).
-- **One process, no network**: VBA-M needs IPC or sockets because each player is a separate
-  emulator. Ours are 4 cores in one process: a shared in-memory hub routes broadcasts, connections
-  and packets between the adapters, with a mailbox per adapter (lock-free or a short mutex, like
-  `share.c`).
-- **Timing**: the games tolerate radio latency (retransmits, timeouts in frames), so no
-  cycle-level lockstep like the cable's (which costs ~3.5 ms per frame per player on Unbound):
-  delivering packets at frame granularity should do. Our emulators stay within about a frame of
-  each other; if a late unheard game misses timeouts, wirelessly connected games can be
-  "favored" like cable partners (`emu.c`).
-- **UI**: a pause-menu switch like the cable's, WIRELESS ADAPTER ON/OFF, exclusive with the link
-  cable (one serial port). FireRed shows its Wireless Communication System counter only with the
-  adapter detected, so when the games look for it decides whether it must be on before booting:
-  to be tested. A dev command `<player> WIRELESS ON|OFF` for scripts.
-- The JIT is unaffected: serial register accesses go through mGBA's I/O handlers.
+- `source/rfu.c`: one `struct rfu` per player, an mGBA `GBASIODriver` (no mGBA patch): it times
+  Normal 32-bit transfers itself from `writeSIOCNT`, since the clock can come from either side
+  (the login even switches clock mid-transfer), and polls the hub every ~1 ms while waiting. The
+  player's emulation thread plugs it in between two slices, like the cable (`emu.c`).
+- The hub (the radio): every adapter in the process is in range of every other. Shared state
+  under one mutex (lv2 on the PS3, pthread in the harness); a waiting adapter reads a volatile
+  stamp first and only locks when something changed. A host's send reaches each client's queue at
+  once and brings back the oldest packet that client queued for it, so nothing waits for another
+  game's thread. Queues of 8 packets instead of hardware's single buffers: games whose threads
+  drift a frame apart lose nothing (hardware drops a packet that isn't read in time; the games'
+  own sequence numbers would then count an error).
+- Games with the adapter on are "favored" like cable partners when the heard game has one too:
+  same thread priority, and the main loop waits for them, so they stay within a frame.
+- New ids at each new room or connection; connections succeed at once (a connect poll retries
+  while the room is closed); links are never lost by the radio, only by a player leaving
+  (reset, Bye, unplug, quit), so connection recovery (0x32-0x34) always fails.
+- Cost: nothing measurable. Four FireReds in the Union Room, two trading: 59.9-60 fps, ~5-6 ms per
+  emulator per frame, the same as without the adapter.
 
-## Feasibility
+## Tests
 
-Good for the Pokemon games' Union Room trades: the protocol is documented under MIT, VBA-M proves
-high-level emulation works for them, mGBA has the right driver hook, and one process is the
-simplest topology there is. Risks:
-1. The exact acknowledgement and "wait" timing librfu expects (VBA-M needed tuning: compare
-   transcripts with it).
-2. Timeouts across our emulator threads when a game runs late.
-3. Unbound's engine (CFRU) may differ from FireRed in its wireless code: test it.
-4. Tests need real games and saves at the Union Room: scripted, kept out of the repo.
-
-## Plan
-
-1. **Reference transcript**: run two Emeralds (or FireReds) trading in VBA-M's `--link rfu`
-   harness with its link tracing on; record the command sequence for entering the Union Room,
-   hosting, joining and one trade. Read the matching librfu code in the decompilation for the
-   timeouts.
-2. **Desktop harness** (fast iteration, like `tools/mgba_exact.sh`): two, then four mGBA cores in
-   one process with our adapter and hub, scripted input to the Union Room, the serial transcript
-   compared with VBA-M's.
-3. **Adapter and hub**: Hello/Setup, broadcast and scan, host and connect, send/receive/wait,
-   disconnect and bye; per-adapter mailboxes; frame-level delivery.
-4. **In ps3gba**: the pause-menu switch, the dev command and log lines, then RPCS3 and the
-   console: FireRed to FireRed trade, Emerald, Unbound trade (the goal), 3-4 players in the
-   Union Room, a battle.
-5. **Cost and docs**: per-frame cost with 4 connected players on the console, CONTRIBUTING and
-   notes, a 0.1 step in CHANGELOG.md.
-
-## Tests and assets
-
-- The owner provides a FireRed save standing in front of the Union Room (Pokemon Center 2F); copy
-  it for each player (saves are per game and per name: `saves/<game>/<save>.sav`), on the console
-  and in RPCS3. Games, saves and VBA-M transcripts of real games stay out of the repo.
-- Scripted input drives both players into the Union Room and through a trade; check each step
-  with screenshots (presses during fades get lost) and the new log lines.
-- Unbound: the owner's Unbound saves are on the CFW console; use copies, never their real saves.
-
-## Done means
-
-Two players trade in FireRed's Union Room on the console (then Unbound, then 3-4 players), the
-link cable and everything else work as before (`tools/bench.sh 4` still at 60), the docs are
-updated, and CHANGELOG.md gets a 0.1 step (its number decided when merging: another feature may
-land first).
+- `tools/rfu_test.sh <script> <rom> <save> [<rom> <save>...]`: 2-4 mGBA cores in one process on
+  the Mac (in the toolchain container), each with the adapter, a frame of each in turn on one
+  thread; script commands at the top of `tests/rfu/harness.c` (presses, holds, waits, stalls,
+  screenshots, `TRACE ON` for every command and reply). Each game's save is written to
+  `build/rfu_test/shots/P<n>.sav` at the end. A run of a few thousand frames takes ~10-30 s.
+- `tests/rfu/trade.txt`: two FireReds trade (any save standing at the Union Room attendant, a
+  Normal type second in the party; copies of one save are fine). `tests/rfu/trade4.txt`: four
+  players, two trades at once (one save copied as four trainers with `tools/save_trainer.py`).
+- On the console: the same through the dev commands (`<p> WIRELESS ON`, `<p> HOLD <button>
+  <frames>` to walk), checked with screenshots: the harness scripts' waits fit (CROSS for A,
+  CIRCLE for B, WAITGBA for WAIT).
+- Games, saves and transcripts of real games stay out of the repo.

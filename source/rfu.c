@@ -442,7 +442,7 @@ static int execute(struct rfu* rfu, uint32_t* out) {
 		if (count) {
 			n->setup = in[0];
 			n->max_clients = 4 - (in[0] >> 16 & 3);
-			rfu->timeout = in[0];
+			rfu->timeout = in[0] & 0xFF;
 		}
 		break;
 	case CMD_HOST_START:
