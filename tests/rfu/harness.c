@@ -1,6 +1,6 @@
 // Wireless Adapter harness, run by tools/rfu_test.sh: 2-4 GBA cores in one process, each with
 // source/rfu.c's adapter plugged in, driven by a script on one thread (a frame of each game in
-// turn, so every run is the same).
+// turn: runs repeat, but for the game clock, which is the host's).
 //
 // usage: harness <script> <rom> <save> [<rom> <save>...]   (one pair per player, save "-": none)
 // Script, one command per line (players are 0-3, as in ps3gba's dev commands):
@@ -13,7 +13,8 @@
 //   SHOT <name>             all screens side by side, to <name>.ppm in the current folder
 //   TRACE ON|OFF            log every adapter command (rfu_trace)
 //   # comment
-// ROMs and saves are read into memory; nothing is written back.
+// ROMs and saves are read into memory; nothing is written back. At the end each game's save
+// memory goes to P<n>.sav in the current folder (e.g. to check what a trade did).
 #include <mgba/core/core.h>
 #include <mgba/gba/core.h>
 #include <mgba/internal/gba/gba.h>
@@ -156,8 +157,7 @@ int main(int argc, char** argv) {
 		core->loadROM(core, VFileFromConstMemory(rom, rom_size));
 		core->loadSave(core, VFileMemChunk(save, save_size));
 		core->setVideoBuffer(core, players[i].video, GBA_VIDEO_HORIZONTAL_PIXELS);
-		core->rtc.override = RTC_FAKE_EPOCH;
-		core->rtc.value = 1767268800000LL; // 2026-01-01 12:00 UTC
+		// The host's clock: games such as Unbound refuse a clock earlier than their save's.
 		core->reset(core);
 		players[i].core = core;
 		rfu_create(&players[i].rfu, i);
@@ -199,6 +199,18 @@ int main(int argc, char** argv) {
 		char state[64];
 		rfu_describe(i, state, sizeof(state));
 		printf("[%d] P%d: %s\n", frame, i + 1, state);
+		void* sram;
+		size_t size = players[i].core->savedataClone(players[i].core, &sram);
+		char path[16];
+		snprintf(path, sizeof(path), "P%d.sav", i + 1); // what the game saved, to check a trade
+		FILE* f = fopen(path, "wb");
+		if (f && size) {
+			fwrite(sram, 1, size, f);
+		}
+		if (f) {
+			fclose(f);
+		}
+		free(sram);
 		players[i].core->deinit(players[i].core);
 	}
 	return 0;
