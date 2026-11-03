@@ -7,9 +7,10 @@ ps3gba session, up to 4 at once.
 ## Status (2026-11-03)
 
 - **Works on the CFW console**: two FireReds traded in the Union Room (trading board), then four
-  players in the room with two trades, the saves checked after each; 59.9-60 fps throughout,
-  ~5-6 ms of emulation per player. `tools/bench.sh 4` (the cable) unchanged: 59.9 fps, 60/60
-  frames per player.
+  players in the room with two trades at once, the saves checked after each; 59.9-60 fps, 60
+  frames per player every second, ~5-6 ms of emulation per player. A player leaving mid-trade
+  (adapter off, then quit and restart): the other recovers, both trade again. `tools/bench.sh 4`
+  (the cable) unchanged: 59.9 fps, 60/60 frames per player.
 - Desktop harness: the same trades with 2 and 4 players, also with games stalling at random (a
   late emulation thread), and the Union Room's trainer card exchange. Players leaving mid-trade
   (adapter off, reset), as client or host, with a third player in the room: the others recover,
@@ -80,8 +81,11 @@ Sources: [afska/gba-link-connection](https://github.com/afska/gba-link-connectio
   game's thread. Queues of 8 packets instead of hardware's single buffers: games whose threads
   drift a frame apart lose nothing (hardware drops a packet that isn't read in time; the games'
   own sequence numbers would then count an error).
-- Games with the adapter on are "favored" like cable partners when the heard game has one too:
-  same thread priority, and the main loop waits for them, so they stay within a frame.
+- Games whose adapters are in a session (hosting, searching, connecting or connected, and a second
+  after: FireRed's Union Room goes from hosting to searching through idle frames) are "favored"
+  like cable partners while the heard game's is in one too: same thread priority, and the main
+  loop waits for them, so they stay within a frame. An adapter merely plugged in costs nothing
+  (`rfu_in_session`, read every frame without the hub's lock: lv2 mutexes pass no priority on).
 - New ids at each new room or connection; connections succeed at once (a connect poll retries
   while the room is closed); links are never lost by the radio, only by a player leaving
   (reset, Bye, unplug, quit), so connection recovery (0x32-0x34) always fails. A host loses a
@@ -90,8 +94,11 @@ Sources: [afska/gba-link-connection](https://github.com/afska/gba-link-connectio
 - Unplugged mid-transfer: a transfer the GBA clocks ends with all ones (the line floats high); one
   the adapter was to clock never ends, as on hardware. Ending that one too hung FireRed: its
   interrupt handler then waits for a handshake on SI, which floats high with nothing plugged in.
-- Cost: nothing measurable. Four FireReds in the Union Room, two trading: 59.9-60 fps, ~5-6 ms per
-  emulator per frame, the same as without the adapter.
+- Cost (CFW console): adapters plugged in but unused cost nothing (4 Unbound at the bench spot:
+  main loop 8.9 ms per frame either way; 14 ms when every plugged adapter was favored). Four
+  FireReds in the Union Room: 59.9 fps, 60 frames each, ~5-6 ms per emulator per frame, the main
+  loop waiting 13.3 ms for all four. During trades each game's save costs the display one frame
+  (34 ms): the write (~60 ms) runs on the emulation thread, which the main loop waits for.
 
 ## Tests
 
@@ -108,5 +115,7 @@ Sources: [afska/gba-link-connection](https://github.com/afska/gba-link-connectio
   Each ends with the parties swapped in P1.sav and P2.sav.
 - On the console: the same through the dev commands (`<p> WIRELESS ON`, `<p> HOLD <button>
   <frames>` to walk), checked with screenshots: the harness scripts' waits fit (CROSS for A,
-  CIRCLE for B, WAITGBA for WAIT).
+  CIRCLE for B, WAITGBA for WAIT). With 3-4 players, look at each player's trading board before
+  picking an offer: the order of the offers differs between players (trade4.txt's "first
+  offer" was another host's there, whose trainer was then busy).
 - Games, saves and transcripts of real games stay out of the repo.

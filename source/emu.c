@@ -977,9 +977,17 @@ void emu_frame_begin(void) {
 	lock();
 	// Player 1 is heard when playing, else the first one playing.
 	struct player* heard = NULL;
-	for (int i = 0; i < MAX_PLAYERS && !heard; ++i) {
-		if (is_running(&players[i]) && players[i].state == PS_PLAYING) {
-			heard = &players[i];
+	for (int i = 0; i < MAX_PLAYERS; ++i) {
+		struct player* p = &players[i];
+		if (!heard && is_running(p) && p->state == PS_PLAYING) {
+			heard = p;
+		}
+		// A second's grace after a session: FireRed's Union Room goes from hosting to searching
+		// and back through idle frames.
+		if (p->rfu_attached && rfu_in_session(p->index)) {
+			p->rfu_session = 60;
+		} else if (p->rfu_session > 0) {
+			--p->rfu_session;
 		}
 	}
 	bool game = false; // a game loading or running silences the menu music
@@ -994,9 +1002,10 @@ void emu_frame_begin(void) {
 		p->heard = p == heard;
 		// Linked games run in lockstep (mGBA's hard syncs too, whatever the link mode): the heard
 		// one can only keep its pace if the games on its cable keep theirs. Wireless games don't
-		// wait for each other, but kept in step their exchanges stay a frame apart at most.
+		// wait for each other, but kept in step their exchanges stay a frame apart at most: only
+		// while in a session, an adapter merely plugged in costs nothing.
 		p->favored = p->heard || (heard && heard->link_attached && p->link_attached && cable_of(p) == cable_of(heard)) ||
-		             (heard && heard->rfu_attached && p->rfu_attached);
+		             (heard && heard->rfu_session && p->rfu_session);
 		p->input = gba_keys(p);
 		++p->frames_wanted;
 		sysCondBroadcast(p->wake);

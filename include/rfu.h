@@ -47,6 +47,9 @@ void rfu_init(void); // once, before any adapter is plugged in
 void rfu_create(struct rfu* rfu, int node);
 // Hub state for the log: "host 2 clients", "client of P1", "idle"...
 void rfu_describe(int node, char* out, size_t size);
+// Plugged in and hosting, searching, connecting or connected. Doesn't lock (the main loop asks
+// every frame): may lag a change by a frame.
+bool rfu_in_session(int node);
 extern bool rfu_trace; // log every command and reply (desktop harness)
 
 #endif

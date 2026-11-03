@@ -292,7 +292,9 @@ Dockerfile). Verify with `ppu-objdump -d` that no `std`/`stdx` remains in hot pa
   `docs/wireless-adapter.md`): no lockstep, packets queued between the emulation threads through
   a hub under an lv2 mutex, a waiting adapter polling a volatile stamp every ~1 ms of emulated
   time. On the CFW console (2026-11-03) it behaved exactly as in the desktop harness: 2 and 4
-  FireReds traded in the Union Room at 60 fps, emulation cost unchanged.
+  FireReds traded in the Union Room at 60 fps, emulation cost unchanged. Its games are favored
+  only while in a wireless session: favoring every plugged adapter cost the main loop ~5 ms per
+  frame of waiting with 4 players, even with games that never use it.
 - Pokemon keeps the link port in multiplayer mode from the title screen on, so its cable is
   effectively always active: ~70 sleep/wake syncs per frame between the emulator threads. Hence
   games start unplugged (pause menu: LINK CABLE).

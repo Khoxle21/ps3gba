@@ -586,6 +586,12 @@ void rfu_describe(int node, char* out, size_t size) {
 	hub_unlock();
 }
 
+bool rfu_in_session(int node) {
+	// Unlocked: lv2 mutexes don't pass priorities on, the main loop mustn't wait for a game's thread.
+	const volatile struct node* n = &nodes[node];
+	return n->on && n->role != ROLE_IDLE;
+}
+
 // --- The adapter: the serial side, on its player's emulation thread ---
 
 static struct mTiming* timing_of(struct rfu* rfu) {

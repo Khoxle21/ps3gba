@@ -232,6 +232,10 @@ torn lines a linked player one frame ahead could cause).
 - With everyone on one cable (the default build plugs every GBA game in), everyone is favored:
   same as before. It matters with GB/GBC games, unplugged games (the pause-menu cable toggle) or
   two cables.
+- Wireless Adapter games are favored like cable partners, but only while their adapter and the
+  heard game's are in a session (`docs/wireless-adapter.md`). Favoring every plugged adapter
+  made the main loop wait for all four Unbound at the bench spot: 14.0 ms of its 16.7 instead of
+  9.1, frames over 16.7 ms in 24 of 66 s (none dropped); unused adapters now leave it at 8.9.
 - To measure on the console: 4 players with the heard one unlinked (e.g. FireRed + 3 GB/GBC, or
   the cable toggled off) in a busy scene: `perf P<n>` of the heard game should stay at 60 frames
   per second while the others drop, `audio:` 0 ms padded; the `emu: P<n> thread priority` log

@@ -118,6 +118,7 @@ struct player {
 	struct rfu rfu;     // its Wireless Adapter: on the same port, so never with the cable
 	bool rfu_wanted;    // the pause menu's adapter switch (main thread)
 	bool rfu_attached;  // followed like link_attached
+	int rfu_session;    // frames its adapter still counts as in a session (main loop)
 	bool asleep;
 
 	// Performance readout (microseconds)
