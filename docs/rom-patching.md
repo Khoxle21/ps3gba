@@ -1,10 +1,11 @@
 # ROM patching
 
 Status: implemented (2026-11-03, `source/rompatch.c`), done on the CFW console and in RPCS3
-(synthetic files and a real FireRed -> Unbound -> French Unbound chain); results below. Goal: hacks and translations
-distributed as patches (no ROM inside) become playable without a PC tool. The player picks a game
-they own and a patch made for it; the PS3 builds the patched ROM once, which then appears as a
-normal game. The plan follows as written, then what was decided while building it.
+(synthetic files and a real FireRed -> Unbound -> French Unbound chain); results below. Goal:
+hacks and translations distributed as patches (no ROM inside) become playable without a PC tool.
+The player picks a game they own and a patch made for it; the PS3 builds the patched ROM once,
+which then appears as a normal game. The plan follows as written, then what was decided while
+building it.
 
 ## Behavior
 
