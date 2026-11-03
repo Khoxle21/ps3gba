@@ -473,6 +473,13 @@ Dockerfile). Verify with `ppu-objdump -d` that no `std`/`stdx` remains in hot pa
   IP). `NET=1 tools/rpcs3.sh run` writes a per-run config with "Connected" (the shared config.yml
   stays untouched). netctl then reports the Mac's LAN IP and the app's sockets are real host
   sockets: the server listens on the Mac's port 8000, so curl to `127.0.0.1:8000` works.
+- **A big read or write blocks other threads' file I/O for its whole length** (CFW, 2026-11-03):
+  ROM patching read a 32 MB ROM in one `fread` (~0.5 s) and the main loop's dev log line waited
+  for it: one 520 ms frame. In 1 MB pieces the worst frame was 56 ms, in 256 KB pieces 6.6 ms, at
+  the same speed (32 MB written at ~9 MB/s either way). Any thread moving big files while the UI
+  or games run should do it in pieces. The phone server accepted a patch upload on the console.
+- `sys_fs_disk_free` (lv2 syscall 840: path, total free, available free, in bytes) works on CFW
+  and in RPCS3 (which reports ~40 GB); no PRX import needed.
 - RPCS3: a ROM uploaded over loopback (16 MB at ~350 MB/s, the low-priority thread never
   blocking) made one frame take 34 ms while a game ran; the same upload at 4 MB/s (Wi-Fi speed)
   caused no hitch at all, rescan included. Real lv2 preempts by priority, so this is likely

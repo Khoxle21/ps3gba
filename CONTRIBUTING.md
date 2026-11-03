@@ -268,7 +268,11 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
 - Startup: 17-18 s from pressing X on HEN, like any app there (a retail game ~15 s); ours is
   0.9 s of it, to the first frame (covers load after it). See the notes' HEN section.
 - GB/GBC games: run in RPCS3 next to GBA games; not linked, not yet run on the console.
-- Phone web server: works in RPCS3 (`tools/webtest.sh`), not yet tried on the console.
+- Phone web server: works in RPCS3 (`tools/webtest.sh`); on the CFW console a patch upload
+  worked (2026-11-03), the rest not yet tried there.
+- ROM patching: the whole flow on the CFW console (2026-11-03) with a real chain, FireRed US ->
+  Unbound (16 to 32 MB) -> its French translation: list, wrong-version refusal, both builds
+  (5-6 s each, UI at 60 fps), KEEP / DELETE / DELETE BOTH, play and an in-game save.
 - Save management, link cable switch, UI drawing batching: checked in RPCS3; the link cable
   switch and the drawing counters still to check on the console.
 - GBA Wireless Adapter: FireRed Union Room trades on the CFW console, 2 and 4 players at 60 fps;
@@ -276,4 +280,3 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   ([docs/wireless-adapter.md](docs/wireless-adapter.md)).
 - Todo: the manual's URL for Help's QR code (`MANUAL_URL`, top of `source/ui.c`) is a placeholder.
 - Next: 3-4 player UI polish, trades and battles tested with several cables.
-- Planned: ROM patching ([docs/rom-patching.md](docs/rom-patching.md)), in its own branch.

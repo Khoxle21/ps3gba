@@ -1,7 +1,7 @@
 # ROM patching
 
-Status: implemented (2026-11-03, `source/rompatch.c`), tested in RPCS3 (synthetic files and a real
-FireRed -> Unbound -> French Unbound chain); console results below. Goal: hacks and translations
+Status: implemented (2026-11-03, `source/rompatch.c`), done on the CFW console and in RPCS3
+(synthetic files and a real FireRed -> Unbound -> French Unbound chain); results below. Goal: hacks and translations
 distributed as patches (no ROM inside) become playable without a PC tool. The player picks a game
 they own and a patch made for it; the PS3 builds the patched ROM once, which then appears as a
 normal game. The plan follows as written, then what was decided while building it.
@@ -72,6 +72,21 @@ Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't cha
   the new game.
 - **mGBA's patch code** needed `patches/mgba/patch-formats-big-endian.patch`: it read numbers as
   little-endian (every UPS/BPS refused on the PS3), and sized IPS results 16 MB always.
+
+## Console results (CFW, 2026-11-03, dev build)
+
+- With FireRed US, FireRed FR and an Unbound in the library: Square on FireRed FR listed the
+  Unbound UPS greyed (made for FireRed US) and refused it; on FireRed US it was "FOR THIS VERSION".
+- FireRed US (16 MB) + a 26 MB UPS -> Unbound, 32 MB, CRC32 as published: 5.9-6.4 s (read 1.0 s,
+  apply 1.4-1.9 s, write 3.5 s, ~9 MB/s). Unbound + the 1.8 MB French BPS -> 32 MB: 4.7-4.9 s
+  (apply 0.6 s). The UI stays at 60 fps once files move in 256 KB pieces (see the notes).
+- The French BPS was listed on the built Unbound (its checksum), greyed on FireRed. KEEP kept
+  everything; DELETE removed the UPS only; DELETE BOTH removed the BPS and the intermediate
+  Unbound, never FireRed US nor the player's own Unbound.
+- The French game ran (a copy of an Unbound bench save loaded in it) and saved from its own menu:
+  the save file was rewritten. While it ran, another player's Square showed the "must quit"
+  message. The phone server accepted the BPS (then refused it as already there).
+- lv2's `sys_fs_disk_free` (syscall 840) returned the free bytes there (and in RPCS3).
 
 ## Implementation notes
 
