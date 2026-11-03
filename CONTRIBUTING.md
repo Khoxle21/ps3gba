@@ -237,7 +237,7 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   here, the overview in `README.md`.
 - No em dashes in text; plain dashes.
 
-## Status (0.17.7)
+## Status (0.18.0)
 
 - Runs on CFW and on PS3HEN (installed from its pkg). UI at 60 fps, saves, link cable (trades
   verified on hardware). The 0.17.8 release package was played on HEN (welcome screen, music, a
@@ -252,9 +252,9 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
 - Phone web server: works in RPCS3 (`tools/webtest.sh`), not yet tried on the console.
 - Save management, link cable switch, UI drawing batching: checked in RPCS3; the link cable
   switch and the drawing counters still to check on the console.
-- Todo: the manual's URL for Help's QR code (`MANUAL_URL`, top of `source/ui.c`) is a placeholder.
-- Next: 3-4 player UI polish, trades and battles tested with several cables.
 - GBA Wireless Adapter: FireRed Union Room trades on the CFW console, 2 and 4 players at 60 fps;
   Unbound closed its Union Room (no wireless trades there). Battles, chat and LeafGreen not tried
   ([docs/wireless-adapter.md](docs/wireless-adapter.md)).
+- Todo: the manual's URL for Help's QR code (`MANUAL_URL`, top of `source/ui.c`) is a placeholder.
+- Next: 3-4 player UI polish, trades and battles tested with several cables.
 - Planned: ROM patching ([docs/rom-patching.md](docs/rom-patching.md)), in its own branch.

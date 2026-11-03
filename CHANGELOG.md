@@ -4,6 +4,12 @@ Newest first. A major step or optimization is a 0.1 step, a display change or a 
 1.0.0 will be the first release. The build shows the newest version on the welcome screen
 (the Makefile reads the first `## x.y.z - date` heading below).
 
+## 0.18.0 - 2026-11-03
+- GBA Wireless Adapter: WIRELESS ADAPTER in a GBA game's pause menu plugs it in (in place of the
+  link cable), and Pokemon FireRed's Union Room works between up to 4 players: trades at 60 fps,
+  also two at once. A plugged adapter costs nothing while the game doesn't use it. Pokemon
+  Unbound closed its Union Room, so it has no wireless trades.
+
 ## 0.17.9 - 2026-11-03
 - GBA game clocks (Pokemon Ruby, Sapphire, Emerald, Unbound...) show the console's local time,
   from its time zone and summer time settings, instead of UTC (an hour behind in France in
