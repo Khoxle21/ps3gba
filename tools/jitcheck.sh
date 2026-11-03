@@ -31,8 +31,8 @@ case "$GAME" in
 esac
 tools/rpcs3.sh cmd "0 CONNECT" "WAIT 30" "0 START" "WAIT 30" "0 GAME $GAME" "WAIT 20" "0 CROSS" "WAIT 30" "0 CROSS" "$@"
 # A press lost in the menus leaves the game unstarted: say so instead of "no mismatch".
-n=0; until grep -q "jit check: on\|jit profile: on" "$D/log.txt" || [ $n -ge 120 ]; do sleep 1; n=$((n+1)); done
-grep -q "jit check: on\|jit profile: on" "$D/log.txt" || { echo "the game did not start: nothing checked"; exit 1; }
+n=0; until grep -q "jit check: on\|jit profile: on\|soundcheck P1: on" "$D/log.txt" || [ $n -ge 120 ]; do sleep 1; n=$((n+1)); done
+grep -q "jit check: on\|jit profile: on\|soundcheck P1: on" "$D/log.txt" || { echo "the game did not start: nothing checked"; exit 1; }
 end=$(( $(date +%s) + ${MINUTES:-15} * 60 ))
 seed=${SEED:-1}
 while [ "$(date +%s)" -lt "$end" ]; do

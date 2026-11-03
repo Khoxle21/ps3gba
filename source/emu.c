@@ -7,12 +7,14 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include <sys/systime.h>
 #include <ppu-lv2.h>
 #include <sys/cond.h>
 #include <sys/mutex.h>
 #include <sys/thread.h>
+#include <sysutil/sysutil.h>
 
 #include <mgba/core/log.h>
 #include <mgba/gb/interface.h>
@@ -157,6 +159,39 @@ static bool save_sync(struct VFile* vf, void* buffer, size_t size) {
 	return true;
 }
 
+// mGBA keeps a GBA cartridge clock in a 16-byte footer after the save: the date and time the game
+// last read (BCD), the control byte, then the time(0) it read them at (little-endian). On load
+// their difference is the clock's offset.
+static void rtc_bcd(const struct tm* t, u8 control, u8* out) {
+	int v[7] = { t->tm_year - 100, t->tm_mon + 1, t->tm_mday, t->tm_wday,
+	             control & 0x40 ? t->tm_hour : t->tm_hour % 12, t->tm_min, t->tm_sec }; // as gpio.c
+	for (int i = 0; i < 7; ++i) {
+		out[i] = v[i] / 10 % 10 << 4 | v[i] % 10;
+	}
+}
+
+// Up to 0.17.8 newlib had no time zone, so the clocks ps3gba saved ran on UTC: a footer dated UTC
+// at its time(0) moves to local time. Any other clock (e.g. from an emulator on a computer) keeps
+// running as it was.
+static void rtc_utc_to_local(u8* save, size_t size) {
+	if (size % 256 != 16) { // GBA saves are 512 B-128 KB; GB clock footers 40-136 bytes
+		return;
+	}
+	u8* footer = save + size - 16;
+	time_t latch = 0;
+	for (int i = 15; i >= 8; --i) {
+		latch = latch << 8 | footer[i];
+	}
+	struct tm t;
+	u8 utc[7];
+	gmtime_r(&latch, &t);
+	rtc_bcd(&t, footer[7], utc);
+	if (memcmp(footer, utc, 7) == 0) {
+		localtime_r(&latch, &t);
+		rtc_bcd(&t, footer[7], footer);
+	}
+}
+
 static struct VFile* open_save(struct player* p) {
 	char tmp[600];
 	snprintf(tmp, sizeof(tmp), "%s.tmp", p->save_path);
@@ -164,6 +199,9 @@ static struct VFile* open_save(struct player* p) {
 	void* data = read_file(p->save_path, &size);
 	if (!data) {
 		data = read_file(tmp, &size); // interrupted rename
+	}
+	if (data) {
+		rtc_utc_to_local(data, size);
 	}
 	struct VFile* vf = VFileMemChunk(data, data ? size : 0);
 	free(data);
@@ -411,6 +449,22 @@ static void player_thread(void* context) {
 
 void emu_init(void) {
 	mLogSetDefaultLogger(&logger);
+	// The PS3's clock runs on UTC and newlib knows no time zone: give it the console's, so GBA
+	// cartridge clocks (mGBA's localtime_r) read local time.
+	s32 zone = 0, summer = 0; // minutes east of UTC; the XMB's daylight saving time switch
+	sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_TIMEZONE, &zone);
+	sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME, &summer);
+	int east = zone + (summer ? 60 : 0);
+	char tz[32];
+	snprintf(tz, sizeof(tz), "LOC%c%d:%02d", east < 0 ? '+' : '-', abs(east) / 60, abs(east) % 60); // POSIX: west
+	setenv("TZ", tz, 1);
+	tzset();
+	time_t now = time(0);
+	struct tm t;
+	localtime_r(&now, &t);
+	log_printf("emu: time(0) %lld, time zone %d min, summer time %d, TZ=%s: game clock %d-%02d-%02d %02d:%02d:%02d\n",
+	           (long long) now, (int) zone, (int) summer, tz, t.tm_year + 1900, t.tm_mon + 1, t.tm_mday, t.tm_hour,
+	           t.tm_min, t.tm_sec);
 	GBASIOLockstepCoordinatorInit(&link_cables[0]);
 	GBASIOLockstepCoordinatorInit(&link_cables[1]);
 	sys_mutex_attr_t mutex_attr;
@@ -465,6 +519,9 @@ static struct mCore* start_ref_core(struct player* p) {
 	core->loadROM(core, VFileFromConstMemory(roms[p->rom].data, roms[p->rom].size));
 	size_t size = 0;
 	void* data = read_file(p->save_path, &size);
+	if (data) {
+		rtc_utc_to_local(data, size); // as the player's save
+	}
 	core->loadSave(core, VFileMemChunk(data, data ? size : 0));
 	free(data);
 	p->ref_frame = calloc(GBA_SCREEN_W * GBA_SCREEN_H, sizeof(mColor));
@@ -511,6 +568,9 @@ static struct mCore* start_twin(struct player* p) {
 	core->rtc.value = SOUNDCHECK_EPOCH;
 	size_t size = 0;
 	void* data = read_file(p->save_path, &size);
+	if (data) {
+		rtc_utc_to_local(data, size); // as the player's save
+	}
 	core->loadSave(core, VFileMemChunk(data, data ? size : 0));
 	free(data);
 	p->twin_frame = calloc(GBA_SCREEN_W * GBA_SCREEN_H, sizeof(mColor));

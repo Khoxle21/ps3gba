@@ -220,6 +220,33 @@ Dockerfile). Verify with `ppu-objdump -d` that no `std`/`stdx` remains in hot pa
 - Silence the default logger: it prints every DMA/BIOS call.
 - Saves: hook the memory VFile's `sync` (mGBA calls it once a save has settled) and write
   atomically (temp file + rename; lv2 may refuse to rename over an existing file).
+- **Game clocks: the PS3's clock runs on UTC and newlib has no time zone.** mGBA's GBA cartridge
+  clock (RTC: Pokemon Ruby/Sapphire/Emerald, Unbound...) converts `time(0)` with `localtime_r`
+  (`src/gba/cart/gpio.c`), so games read UTC: on the CFW console (2026-11-03, set to UTC+1)
+  Unbound latched 23:08 on Nov 2 at 00:08 local time on Nov 3. The console's settings:
+  `sysUtilGetSystemParamInt(SYSUTIL_SYSTEMPARAM_ID_TIMEZONE)` gives minutes east of UTC (60
+  there; RPCS3 gave 180), `SYSUTIL_SYSTEMPARAM_ID_SUMMERTIME` the XMB's manual daylight saving
+  time switch (0 there; read as +60 min when on, not yet seen on). **newlib takes a POSIX time
+  zone**: `setenv("TZ", "LOC-1:00", 1); tzset();` at startup (the sign is west of UTC) and
+  `localtime_r`/`mktime` work in local time, checked on the console: Unbound then latched the
+  console's local time.
+  - mGBA keeps the GBA clock in a 16-byte footer after the save (`GBASavedataRTCBuffer`): the date
+    and time the game last read (BCD), the control byte and `lastLatch`, the `time(0)` it read
+    them at. On load `lastLatch - mktime(date)` is the clock's offset: with the time zone set,
+    footers are exact between ps3gba and mGBA on a computer in the same time zone (checked with a
+    footer 2 h behind: offset 7200, the game read local time minus 2 h). Like a real cartridge, a
+    saved clock keeps running across a change of the summer time switch (the switch only gives
+    newlib a fixed offset, no rules).
+  - Up to 0.17.8 the footers ps3gba wrote were dated UTC (at offset 0, the date equals `gmtime` of
+    `lastLatch`): `rtc_utc_to_local` in `emu.c` re-dates such a footer in local time before mGBA
+    loads it (player's core, the JIT check's reference core and the sound check's twin alike).
+  - When a game quits, ps3gba writes `savedataClone`, which for GBA saves stops at the data: the
+    footer is dropped, and that save's clock restarts on local time at its next start (offset 0).
+    Only a save last written by the game itself, the app then stopped without quitting it, keeps
+    its footer.
+  - GB/GBC clocks (MBC3: Gold/Silver/Crystal; HuC-3, TAMA5) only add the seconds elapsed since
+    the last latch to a clock the game sets, and never convert to a date: the time zone doesn't
+    touch them. Their saves store `time(0)` as a Unix time for other emulators.
 - Link cable (`GBASIOLockstep`, compiled from `src/gba/sio/lockstep.c`, left out of the minimal
   build; the Makefile compiles a copy with one fix, see below): **requires one thread per GBA
   whose `sleep` callback blocks.** Now done (one lv2 thread per player). Run cooperatively on

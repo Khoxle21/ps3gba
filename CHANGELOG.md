@@ -4,6 +4,11 @@ Newest first. A major step or optimization is a 0.1 step, a display change or a 
 1.0.0 will be the first release. The build shows the newest version on the welcome screen
 (the Makefile reads the first `## x.y.z - date` heading below).
 
+## 0.17.9 - 2026-11-03
+- GBA game clocks (Pokemon Ruby, Sapphire, Emerald, Unbound...) show the console's local time,
+  from its time zone and summer time settings, instead of UTC (an hour behind in France in
+  winter). Clocks saved by older versions move to local time too.
+
 ## 0.17.8 - 2026-11-02
 - Faster startup: game covers load in the background after the first frame (on the console the
   first frame came 2.6 s after start, now 0.9 s). Covers added over FTP now appear on the next

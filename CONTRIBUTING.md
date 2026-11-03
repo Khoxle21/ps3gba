@@ -158,7 +158,9 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   `LINK_CABLES` build option). GB/GBC games: mGBA's GB core (picked from the ROM header),
   interpreter and software renderer on the PPU, no JIT/SPU/cable; original GB games run on a GBC
   (its built-in colorization), SGB games as a Super Game Boy without border, 160x144 in the
-  top-left of the player's 240x160 frames. The MBC3 clock is saved after the battery RAM. Only
+  top-left of the player's 240x160 frames. The MBC3 clock is saved after the battery RAM. newlib
+  gets the console's time zone (`emu_init`), so GBA cartridge clocks read local time; GBA clocks
+  saved on UTC by 0.17.8 and older move to local time on load (`rtc_utc_to_local`). Only
   the heard game makes sound samples (the others skip them, invisibly to the game); it and the
   games on its cable ("favored") run at thread priority 1199 instead of 1200 and are the only
   ones the main loop waits for; frames are triple-buffered so the others can run late.
