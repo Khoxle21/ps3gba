@@ -4,6 +4,14 @@ Newest first. A major step or optimization is a 0.1 step, a display change or a 
 1.0.0 will be the first release. The build shows the newest version on the welcome screen
 (the Makefile reads the first `## x.y.z - date` heading below).
 
+## 0.19.0 - 2026-11-03
+- ROM patching: hacks and translations distributed as IPS, UPS or BPS patches become new games on
+  the PS3, no PC needed. Copy a patch to `/dev_hdd0/ps3gba/patches/` or add it from the phone
+  page, then press Square on the game it is made for (UPS and BPS patches made for another
+  version are greyed out). A chain works too, e.g. a translation of a hack built from that hack.
+  After a build, ps3gba offers to delete the patch, and in a chain the hack in between if it has
+  no saves; your own game files are never deleted.
+
 ## 0.18.0 - 2026-11-03
 - GBA Wireless Adapter: WIRELESS ADAPTER in a GBA game's pause menu plugs it in (in place of the
   link cable), and Pokemon FireRed's Union Room works between up to 4 players: trades at 60 fps,

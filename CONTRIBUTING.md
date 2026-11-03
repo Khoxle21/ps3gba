@@ -257,7 +257,7 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   here, the overview in `README.md`.
 - No em dashes in text; plain dashes.
 
-## Status (0.18.0)
+## Status (0.19.0)
 
 - Runs on CFW and on PS3HEN (installed from its pkg). UI at 60 fps, saves, link cable (trades
   verified on hardware). The 0.17.8 release package was played on HEN (welcome screen, music, a
