@@ -28,7 +28,9 @@
 #define RECORD PATCH_DIR "/built-games.txt"
 #define ROM_MAX (32 << 20)
 #define PATCH_FILE_MAX (64 << 20)
-#define CHUNK (1 << 20) // ROMs are checksummed a chunk at a time
+// Files are read and written a chunk at a time: one 32 MB read held the drive for ~0.5 s, and
+// the main loop's dev log line waited for it (a UI hitch on the console).
+#define CHUNK (256 << 10)
 #define CRC_CACHE 64
 
 static bool exists(const char* path) {
@@ -50,6 +52,17 @@ static u32 le32(const u8* p) {
 	return p[0] | p[1] << 8 | p[2] << 16 | (u32) p[3] << 24;
 }
 
+// Moves n bytes between buf and f a chunk at a time.
+static bool transfer(FILE* f, u8* buf, size_t n, bool write) {
+	for (size_t done = 0, k; done < n; done += k) {
+		k = n - done < CHUNK ? n - done : CHUNK;
+		if ((write ? fwrite(buf + done, 1, k, f) : fread(buf + done, 1, k, f)) != k) {
+			return false;
+		}
+	}
+	return true;
+}
+
 // The whole file, or NULL with what went wrong in *why.
 static u8* read_whole(const char* path, size_t max, size_t* size, const char** why) {
 	FILE* f = fopen(path, "rb");
@@ -57,7 +70,7 @@ static u8* read_whole(const char* path, size_t max, size_t* size, const char** w
 		*why = "unreadable";
 		return NULL;
 	}
-	setvbuf(f, NULL, _IONBF, 0); // one read straight into the buffer: buffered, 16 MB took 1-3 s
+	setvbuf(f, NULL, _IONBF, 0); // straight into the buffer: buffered, 16 MB took 1-3 s
 	fseek(f, 0, SEEK_END);
 	long n = ftell(f);
 	fseek(f, 0, SEEK_SET);
@@ -67,7 +80,7 @@ static u8* read_whole(const char* path, size_t max, size_t* size, const char** w
 		*why = "too big";
 	} else if (!(data = malloc(n))) {
 		*why = "memory";
-	} else if (fread(data, 1, n, f) != (size_t) n) {
+	} else if (!transfer(f, data, n, false)) {
 		*why = "unreadable";
 		free(data);
 		data = NULL;
@@ -404,7 +417,7 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 	bool ok = f != NULL;
 	if (f) {
 		setvbuf(f, NULL, _IONBF, 0);
-		ok = fwrite(b->out, 1, b->out_size, f) == b->out_size;
+		ok = transfer(f, b->out, b->out_size, true);
 		ok = fclose(f) == 0 && ok;
 	}
 	struct stat st;
