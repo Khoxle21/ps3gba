@@ -802,6 +802,14 @@ static bool rfu_init_driver(struct GBASIODriver* driver) {
 
 static void rfu_deinit(struct GBASIODriver* driver) {
 	struct rfu* rfu = (struct rfu*) driver;
+	if (rfu->busy && (driver->p->siocnt & 1)) {
+		// Unplugged mid-transfer that the GBA clocks: the line floats high, it reads all ones, as on
+		// hardware. One the adapter was to clock never ends there either: the games' watchdog
+		// notices (completing it hung FireRed's interrupt handler, waiting for a handshake).
+		mTimingDeschedule(timing_of(rfu), &rfu->transfer);
+		rfu->busy = false;
+		GBASIONormal32FinishTransfer(driver->p, 0xFFFFFFFF, 0);
+	}
 	reset_adapter(rfu);
 	hub_lock();
 	nodes[rfu->node].on = false;

@@ -1,0 +1,246 @@
+# Two FireReds start a trade (as trade.txt) and P1 turns its adapter off in the middle: P1's game
+# shows the GBA's communication error (turn the console off and on), P2's the wireless one (A: back
+# to the counter). P2 goes back, P1 is reset with its adapter back on, both enter the Union Room
+# again and trade: P1.sav and P2.sav end with the parties swapped, nothing hangs.
+# Into the Pokemon Center: intro, title, Continue, skip the recap
+WAIT 400
+ALL START
+WAIT 200
+ALL START
+WAIT 700
+ALL A
+WAIT 200
+ALL A
+WAIT 200
+ALL B
+WAIT 300
+# The Union Room attendant: yes, save (overwrite), enter
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 400
+ALL A
+WAIT 200
+ALL A
+WAIT 300
+ALL A
+WAIT 800
+ALL A
+WAIT 300
+ALL A
+WAIT 300
+# Identical games host and search for players in step and never see each other: shift one.
+1 STALL 70
+WAIT 600
+# P2 registers its first Pokemon at the attendant beside the trading board (any Normal type wanted)
+1 HOLD UP 32
+1 HOLD LEFT 80
+1 HOLD UP 112
+1 HOLD RIGHT 20
+WAIT 40
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+WAIT 200
+# P1 checks the trading board, picks the first offer and offers its second Pokemon
+0 HOLD UP 32
+0 HOLD LEFT 80
+0 HOLD UP 112
+WAIT 40
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 400
+0 DOWN
+WAIT 30
+0 A
+WAIT 60
+0 A
+WAIT 400
+# P2 accepts: the trade, then both games save
+1 A
+WAIT 150
+1 A
+WAIT 150
+1 A
+WAIT 150
+1 A
+WAIT 150
+1 A
+WAIT 150
+# P1 leaves mid-trade (its adapter off): P2's game notices through the signal strength
+WAIT 300
+0 WIRELESS OFF
+WAIT 1200
+SHOT dropped
+# P2: back to the counter; P1: power off and on, adapter back
+1 A
+WAIT 300
+0 WIRELESS ON
+0 RESET
+# Into the Pokemon Center: intro, title, Continue, skip the recap
+WAIT 400
+0 START
+WAIT 200
+0 START
+WAIT 700
+0 A
+WAIT 200
+0 A
+WAIT 200
+0 B
+WAIT 300
+# The Union Room attendant: yes, save (overwrite), enter
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 150
+ALL A
+WAIT 400
+ALL A
+WAIT 200
+ALL A
+WAIT 300
+ALL A
+WAIT 800
+ALL A
+WAIT 300
+ALL A
+WAIT 300
+# Identical games host and search for players in step and never see each other: shift one.
+1 STALL 70
+WAIT 600
+# P2 registers its first Pokemon at the attendant beside the trading board (any Normal type wanted)
+1 HOLD UP 32
+1 HOLD LEFT 80
+1 HOLD UP 112
+1 HOLD RIGHT 20
+WAIT 40
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+1 A
+WAIT 100
+WAIT 200
+# P1 checks the trading board, picks the first offer and offers its second Pokemon
+0 HOLD UP 32
+0 HOLD LEFT 80
+0 HOLD UP 112
+WAIT 40
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 100
+0 A
+WAIT 400
+0 DOWN
+WAIT 30
+0 A
+WAIT 60
+0 A
+WAIT 400
+# P2 accepts: the trade, then both games save
+1 A
+WAIT 150
+1 A
+WAIT 150
+1 A
+WAIT 150
+1 A
+WAIT 150
+1 A
+WAIT 150
+WAIT 3600
+SHOT done

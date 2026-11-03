@@ -115,7 +115,8 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
 - Wireless Adapter: `tools/rfu_test.sh <script> <rom> <save> [<rom> <save>...]` runs 2-4 mGBA
   cores with `source/rfu.c`'s adapter on the Mac (toolchain container), from a script
   (`tests/rfu/harness.c`), with screenshots and each game's save at the end;
-  `tests/rfu/trade.txt` (two FireReds trade in the Union Room) and `trade4.txt` (four, two trades).
+  `tests/rfu/trade.txt` (two FireReds trade in the Union Room), `trade4.txt` (four, two trades),
+  `leave.txt` and `leave3.txt` (a player leaves mid-trade, everyone recovers and trades).
   `tools/save_trainer.py` copies a Gen 3 save as another trainer (the Union Room needs distinct
   ones). See [docs/wireless-adapter.md](docs/wireless-adapter.md).
 

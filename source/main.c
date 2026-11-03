@@ -501,7 +501,7 @@ static void dev_apply(int frame) {
 	if (cmd->wireless) {
 		emu_wireless_set(p, cmd->wireless == 2);
 		printf("dev: P%d wireless adapter %s%s\n", cmd->player + 1, cmd->wireless == 2 ? "on" : "off",
-		       emu_link_available(p) ? "" : " ignored: no running GBA game");
+		       emu_wireless_available(p) ? "" : " ignored: no running GBA game");
 		dev_head = (dev_head + 1) % DEV_QUEUE;
 		return;
 	}
@@ -854,7 +854,8 @@ static void update_player(struct player* p) {
 	case PS_PAUSED:
 		if (in & BTN_UP) p->pause_sel = (p->pause_sel + PAUSE_COUNT - 1) % PAUSE_COUNT;
 		if (in & BTN_DOWN) p->pause_sel = (p->pause_sel + 1) % PAUSE_COUNT;
-		while ((p->pause_sel == PAUSE_LINK || p->pause_sel == PAUSE_WIRELESS) && !emu_link_available(p)) {
+		while ((p->pause_sel == PAUSE_LINK && !emu_link_available(p)) ||
+		       (p->pause_sel == PAUSE_WIRELESS && !emu_wireless_available(p))) {
 			p->pause_sel += in & BTN_UP ? -1 : 1; // not shown
 		}
 		if (in & (BTN_CIRCLE | BTN_L3 | BTN_R3)) p->state = PS_PLAYING;

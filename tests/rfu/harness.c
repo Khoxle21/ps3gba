@@ -10,6 +10,7 @@
 //   WAIT <frames>           run every game
 //   <p> STALL <frames>      that game alone stops while the others run (a late emulation thread)
 //   <p> WIRELESS ON|OFF     plug the adapter in or out (all start plugged in)
+//   <p> RESET               reset that GBA (as its power switch: the game starts over)
 //   SHOT <name>             all screens side by side, to <name>.ppm in the current folder
 //   TRACE ON|OFF            log every adapter command (rfu_trace)
 //   # comment
@@ -147,7 +148,11 @@ int main(int argc, char** argv) {
 	mLogSetDefaultLogger(&quiet);
 	rfu_init();
 	count = (argc - 2) / 2;
-	for (int i = 0; i < count && i < RFU_MAX; ++i) {
+	if (count > RFU_MAX) {
+		fprintf(stderr, "at most %d players\n", RFU_MAX);
+		return 1;
+	}
+	for (int i = 0; i < count; ++i) {
 		size_t rom_size, save_size = 0;
 		void* rom = read_file(argv[2 + 2 * i], &rom_size);
 		void* save = strcmp(argv[3 + 2 * i], "-") ? read_file(argv[3 + 2 * i], &save_size) : NULL;
@@ -169,26 +174,29 @@ int main(int argc, char** argv) {
 		perror(argv[1]);
 		return 1;
 	}
-	char line[256], a[32], b[32];
+	char line[256], a[32], b[32], name[256];
 	int p, n;
 	while (fgets(line, sizeof(line), script)) {
 		line[strcspn(line, "\r\n#")] = 0;
 		if (sscanf(line, "WAIT %d", &n) == 1) {
 			run(n);
-		} else if (sscanf(line, "SHOT %255s", line) == 1) {
-			shot(line);
+		} else if (sscanf(line, "SHOT %255s", name) == 1) {
+			shot(name);
 		} else if (sscanf(line, "TRACE %3s", a) == 1) {
 			rfu_trace = strcmp(a, "ON") == 0;
 		} else if (sscanf(line, "ALL %31s", a) == 1) {
 			press(-1, 1 << key_of(a), 2);
-		} else if (sscanf(line, "%d HOLD %31s %d", &p, a, &n) == 3 && p < count) {
+		} else if (sscanf(line, "%d HOLD %31s %d", &p, a, &n) == 3 && p >= 0 && p < count) {
 			press(p, 1 << key_of(a), n);
-		} else if (sscanf(line, "%d STALL %d", &p, &n) == 2 && p < count) {
+		} else if (sscanf(line, "%d STALL %d", &p, &n) == 2 && p >= 0 && p < count) {
 			players[p].stall = n;
-		} else if (sscanf(line, "%d WIRELESS %3s", &p, a) == 2 && p < count) {
+		} else if (sscanf(line, "%d RESE%1[T]", &p, a) == 2 && p >= 0 && p < count) {
+			players[p].core->reset(players[p].core);
+			printf("[%d] P%d reset\n", frame, p + 1);
+		} else if (sscanf(line, "%d WIRELESS %3s", &p, a) == 2 && p >= 0 && p < count) {
 			plug(p, strcmp(a, "ON") == 0);
 			printf("[%d] P%d adapter %s\n", frame, p + 1, a);
-		} else if (sscanf(line, "%d %31s", &p, a) == 2 && p < count) {
+		} else if (sscanf(line, "%d %31s", &p, a) == 2 && p >= 0 && p < count) {
 			press(p, 1 << key_of(a), 2);
 		} else if (sscanf(line, "%31s %31s", a, b) >= 1) {
 			fprintf(stderr, "bad line: %s\n", line);

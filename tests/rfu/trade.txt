@@ -107,7 +107,7 @@ WAIT 30
 WAIT 60
 0 A
 WAIT 400
-# P2 accept: the trade, then both games save
+# P2 accepts: the trade, then both games save
 1 A
 WAIT 150
 1 A

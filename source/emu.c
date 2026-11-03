@@ -859,9 +859,14 @@ static bool is_running(const struct player* p) {
 	return false;
 }
 
+bool emu_wireless_available(const struct player* p) {
+	// Not while self-checking: the JIT's reference core or the sound check's twin can't be
+	// linked too, so the two would differ.
+	return p->core && p->core->platform(p->core) == mPLATFORM_GBA && !p->ref && !p->twin;
+}
+
 bool emu_link_available(const struct player* p) {
-	// Not while self-checking: the reference core can't be on the cable, so the two would differ.
-	return LINK_CABLES && p->core && p->core->platform(p->core) == mPLATFORM_GBA && !p->ref;
+	return LINK_CABLES && emu_wireless_available(p);
 }
 
 void emu_link_set(struct player* p, bool on) {
@@ -876,7 +881,7 @@ void emu_link_set(struct player* p, bool on) {
 }
 
 void emu_wireless_set(struct player* p, bool on) {
-	if (!emu_link_available(p)) {
+	if (!emu_wireless_available(p)) {
 		return;
 	}
 	lock();

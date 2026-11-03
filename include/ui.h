@@ -20,7 +20,7 @@ enum { MENU_QUIT = SCREEN_MENU, MENU_ENTRIES };
 void ui_draw_menu(enum screen s, int sel, int* scroll, int frame);
 
 // Pause menu entries, shared with the input handling in main.c. LINK and WIRELESS are left out
-// for games without a link port (emu_link_available).
+// when unavailable (emu_link_available, emu_wireless_available).
 enum { PAUSE_RESUME, PAUSE_QUIT, PAUSE_LINK, PAUSE_WIRELESS, PAUSE_PERF, PAUSE_COUNT };
 // Save options menu entries (Triangle on a save).
 enum { SAVE_MENU_RENAME, SAVE_MENU_COPY, SAVE_MENU_DELETE, SAVE_MENU_BACK, SAVE_MENU_COUNT };

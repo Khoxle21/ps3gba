@@ -11,7 +11,9 @@ ps3gba session, up to 4 at once.
   ~5-6 ms of emulation per player. `tools/bench.sh 4` (the cable) unchanged: 59.9 fps, 60/60
   frames per player.
 - Desktop harness: the same trades with 2 and 4 players, also with games stalling at random (a
-  late emulation thread), and the Union Room's trainer card exchange.
+  late emulation thread), and the Union Room's trainer card exchange. Players leaving mid-trade
+  (adapter off, reset), as client or host, with a third player in the room: the others recover,
+  everyone enters again and trades, nothing hangs.
 - **Pokemon Unbound (2.1.1.1) can't trade over it**: the game detects the adapter, but its own
   scripts closed the Union Room and link trading ("the Union Room is no longer available",
   "trading is no longer available from the Cable Club. Please use Unbound Cloud"), the cable too.
@@ -29,6 +31,9 @@ ps3gba session, up to 4 at once.
   trading board showed nothing). `tools/save_trainer.py` copies a save as another trainer.
 - Trades go through the trading board: one player registers a Pokemon with the attendant beside
   it, the other checks the board, picks the offer and offers a Pokemon of the wanted type.
+- Turning the adapter off (or quitting, or resetting) mid-session is like pulling a real one: that
+  game shows the GBA's communication error (quit or restart it); the others notice within a few
+  seconds and show the wireless error (A: back to the counter, then enter again).
 
 ## The device (what the emulation follows)
 
@@ -79,7 +84,12 @@ Sources: [afska/gba-link-connection](https://github.com/afska/gba-link-connectio
   same thread priority, and the main loop waits for them, so they stay within a frame.
 - New ids at each new room or connection; connections succeed at once (a connect poll retries
   while the room is closed); links are never lost by the radio, only by a player leaving
-  (reset, Bye, unplug, quit), so connection recovery (0x32-0x34) always fails.
+  (reset, Bye, unplug, quit), so connection recovery (0x32-0x34) always fails. A host loses a
+  client's slot at once (its signal reads 0, as for a GBA switched off: librfu times it out); a
+  client of a leaving host is told 0x29 if it waits, else sees its state go idle.
+- Unplugged mid-transfer: a transfer the GBA clocks ends with all ones (the line floats high); one
+  the adapter was to clock never ends, as on hardware. Ending that one too hung FireRed: its
+  interrupt handler then waits for a handshake on SI, which floats high with nothing plugged in.
 - Cost: nothing measurable. Four FireReds in the Union Room, two trading: 59.9-60 fps, ~5-6 ms per
   emulator per frame, the same as without the adapter.
 
@@ -93,6 +103,9 @@ Sources: [afska/gba-link-connection](https://github.com/afska/gba-link-connectio
 - `tests/rfu/trade.txt`: two FireReds trade (any save standing at the Union Room attendant, a
   Normal type second in the party; copies of one save are fine). `tests/rfu/trade4.txt`: four
   players, two trades at once (one save copied as four trainers with `tools/save_trainer.py`).
+  `tests/rfu/leave.txt`: the client turns its adapter off mid-trade, then both recover and trade;
+  `leave3.txt`: the host resets mid-trade with a third player in the room (three trainers).
+  Each ends with the parties swapped in P1.sav and P2.sav.
 - On the console: the same through the dev commands (`<p> WIRELESS ON`, `<p> HOLD <button>
   <frames>` to walk), checked with screenshots: the harness scripts' waits fit (CROSS for A,
   CIRCLE for B, WAITGBA for WAIT).

@@ -20,9 +20,10 @@ void emu_frame_end(void);
 // top-left corner of the player's frames and textures.
 void emu_screen_size(const struct player* p, unsigned* w, unsigned* h);
 // A running GBA game can be plugged into the link cable or have a Wireless Adapter on its link
-// port, not both (GB/GBC games have neither). The switches take effect on the player's emulation
-// thread; the next game starts with neither.
+// port, not both (GB/GBC games have neither; LINK_CABLES=0 builds no cable). The switches take
+// effect on the player's emulation thread; the next game starts with neither.
 bool emu_link_available(const struct player* p);
+bool emu_wireless_available(const struct player* p);
 void emu_link_set(struct player* p, bool on);
 void emu_wireless_set(struct player* p, bool on);
 // Player currently using this save, or -1.
