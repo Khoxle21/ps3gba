@@ -498,7 +498,7 @@ static void dev_apply(int frame) {
 	}
 	struct player* p = &players[cmd->player];
 	if (cmd->patch[0]) { // PATCH: by name, whatever the list's order
-		if (p->state == PS_PATCHES && p->num_patches < 0) {
+		if (p->state == PS_PATCHES && p->num_patches == -1) {
 			return; // still reading: try again next frame
 		}
 		int i = 0;
@@ -891,7 +891,7 @@ static void update_player(struct player* p) {
 		break;
 	}
 	case PS_PATCHES: {
-		if (p->num_patches < 0) {
+		if (p->num_patches == -1) {
 			p->num_patches = rompatch_list_result(p->index, p->patches);
 		}
 		if (in & BTN_CIRCLE) {

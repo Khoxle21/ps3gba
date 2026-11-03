@@ -857,8 +857,11 @@ static void draw_patches(const struct player* p, float x, float y, float w, floa
 	if (p->num_patches <= 0) {
 		char lines[WRAP_LINES + 2][WRAP_COLS];
 		int n = 1;
-		snprintf(lines[0], WRAP_COLS, p->num_patches < 0 ? "CHECKING..." : "NO PATCH FOR THIS GAME");
-		if (p->num_patches == 0) {
+		snprintf(lines[0], WRAP_COLS, p->num_patches == -1 ? "CHECKING..." : p->num_patches < 0 ? "CAN'T LIST THE PATCHES"
+		         : "NO PATCH FOR THIS GAME");
+		if (p->num_patches == -2) {
+			snprintf(lines[n++], WRAP_COLS, "RESTART PS3GBA AND TRY AGAIN");
+		} else if (p->num_patches == 0) {
 			n += wrap("ADD .IPS .UPS .BPS FILES FROM YOUR PHONE, OR COPY THEM TO", ts, lw - 8 * u, lines + 1);
 			snprintf(lines[n++], WRAP_COLS, "%s", PATCH_DIR); // one line, smaller if need be
 		}

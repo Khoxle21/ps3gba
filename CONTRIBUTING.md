@@ -225,7 +225,8 @@ with Pillow. [RPCS3](https://rpcs3.net) is optional for quick checks (useful, ne
   adds games (each checked by mGBA's header test), covers, saves (always as a new save) and
   patches (`.ips/.ups/.bps`, checked by their first bytes, into `patches/`),
   downloads saves and sets the player's name. URLs carry a per-boot token per player. Uploads
-  stream to `ps3gba/tmp/` and are renamed into place whole; new games come in through
+  stream to `ps3gba/tmp/` and are renamed into place whole, under the library's place lock
+  (`library_place_lock`, shared with ROM patching's build and cleanup); new games come in through
   `library_rescan()` (off-thread, swapped in between frames). Games without a cover get their box
   art from libretro-thumbnails through the phone, so the PS3 needs no internet.
 - `source/share.c` state shared with the web server threads; the main loop only ever try-locks it.

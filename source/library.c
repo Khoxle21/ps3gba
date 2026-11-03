@@ -229,7 +229,7 @@ static void find_covers(struct game* games, int n, const struct game* old, int o
 	}
 }
 
-static sys_mutex_t rescan_lock;
+static sys_mutex_t rescan_lock, place_lock;
 
 static void cover_thread(void* arg) {
 	library_rescan(NULL); // the same list, with its covers
@@ -254,6 +254,7 @@ void library_scan(void) {
 	sys_mutex_attr_t attr;
 	sysMutexAttrInitialize(attr);
 	sysMutexCreate(&rescan_lock, &attr);
+	sysMutexCreate(&place_lock, &attr);
 	// Covers decode off the main thread and come in like any rescan: on the console they held
 	// the first frame back ~1.8 s for 5 games, and the welcome screen doesn't show them.
 	sys_ppu_thread_t thread;
@@ -419,6 +420,24 @@ void library_rom_path(const char* file, char* out, size_t len) {
 static bool exists(const char* path) {
 	struct stat st;
 	return stat(path, &st) == 0;
+}
+
+bool library_game_exists(const char* file) {
+	char path[512];
+	library_rom_path(file, path, sizeof(path));
+	return exists(path);
+}
+
+void library_place_lock(void) {
+	sysMutexLock(place_lock, 0);
+}
+
+void library_place_unlock(void) {
+	sysMutexUnlock(place_lock);
+}
+
+bool library_place(const char* tmp, const char* path) {
+	return !exists(path) && rename(tmp, path) == 0; // lv2 may rename over a file: check first
 }
 
 // A save file, or the ".tmp" left alone by an interrupted write (open_save() in emu.c recovers it).

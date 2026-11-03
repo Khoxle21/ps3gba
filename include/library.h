@@ -83,5 +83,13 @@ int library_list_saves(const char* file, struct save_info* out, int max);
 void library_save_path(const char* file, const char* save, char* out, size_t len);
 // The ROM's path: in roms/ or one of its subfolders (in roms/ itself if it doesn't exist).
 void library_rom_path(const char* file, char* out, size_t len);
+// Whether a game's ROM is on the drive.
+bool library_game_exists(const char* file);
+// Files moved into the library, or deleted from it, after checking what is there (phone uploads,
+// ROM patching) take this lock: a check and its rename or removal are then one step.
+void library_place_lock(void);
+void library_place_unlock(void);
+// Renames tmp to path if path doesn't exist yet (with the place lock held).
+bool library_place(const char* tmp, const char* path);
 
 #endif

@@ -9,6 +9,9 @@
 // (it reads whole ROMs): lists per player (slot), one build or cleanup at a time for everyone.
 
 #define PATCH_LIST_MAX 32
+// Largest patch file: a UPS can hold a whole 32 MB result (a hack's is often ~26 MB). Phone
+// uploads stream to the drive, and the build has the memory (nobody plays then).
+#define PATCH_FILE_MAX (64 << 20)
 
 // How a patch fits the game it is listed for.
 enum patch_fit {
@@ -39,7 +42,8 @@ struct patch_result {
 bool rompatch_is_patch_file(const char* name);
 // The format from a file's first 5 bytes: "IPS", "UPS", "BPS", or NULL.
 const char* rompatch_format(const unsigned char* head);
-// The patches for a game (struct game.file), read off the main thread. -1 while still reading.
+// The patches for a game (struct game.file), read off the main thread. -1 while still reading,
+// -2 if it can't (no thread for it: restart).
 void rompatch_list_async(int slot, const char* game);
 int rompatch_list_result(int slot, struct patch_info* out);
 // Starts building a game from `game` and the patch, or deleting the patch file (and `base`, a

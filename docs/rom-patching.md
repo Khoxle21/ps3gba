@@ -71,6 +71,11 @@ Not covered: xdelta/VCDIFF patches (mGBA has no decoder for them). IPS can't cha
   names it with its current checksum, and DELETE BOTH checks that again, with no saves, right
   before deleting (its empty saves folder goes too). The questions show over the carousel, on
   the new game.
+- **Races**: the build's final rename, the cleanup's checks and deletion, and every phone upload
+  take one lock (`library_place_lock`): a game of the new game's name uploaded meanwhile wins
+  cleanly, and a save uploaded for the intermediate ROM keeps it ("WAS KEPT: IT HAS SAVES NOW";
+  the other reasons: changed since built, unreadable; already gone counts as done). Patch files
+  are limited to 64 MB everywhere (`PATCH_FILE_MAX`).
 - **mGBA's patch code** needed `patches/mgba/patch-formats-big-endian.patch`: it read numbers as
   little-endian (every UPS/BPS refused on the PS3), and sized IPS results 16 MB always.
 

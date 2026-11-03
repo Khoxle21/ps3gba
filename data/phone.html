@@ -266,7 +266,7 @@ $("#patch").onchange = async () => {
 		let result;
 		const ext = (f.name.match(/\.(ips|ups|bps)$/i) || [""])[0].toLowerCase();
 		if (!ext) result = [false, "ONLY .IPS .UPS .BPS FILES"];
-		else if (f.size > 32 << 20) result = [false, "32 MB AT MOST"];
+		else if (f.size > 64 << 20) result = [false, "64 MB AT MOST"]; // rompatch.h PATCH_FILE_MAX
 		else result = await send("patch?" + query({ name: clean(f.name.slice(0, -ext.length)).slice(0, 128) + ext }), f, what);
 		if (!result[0]) failed.push(`${f.name}: ${result[1]}`);
 	}

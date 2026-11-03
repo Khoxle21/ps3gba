@@ -27,7 +27,6 @@
 
 #define RECORD PATCH_DIR "/built-games.txt"
 #define ROM_MAX (32 << 20)
-#define PATCH_FILE_MAX (64 << 20)
 // Files are read and written a chunk at a time: one 32 MB read held the drive for ~0.5 s, and
 // the main loop's dev log line waited for it (a UI hitch on the console).
 #define CHUNK (256 << 10)
@@ -76,7 +75,11 @@ static u8* read_whole(const char* path, size_t max, size_t* size, const char** w
 	fseek(f, 0, SEEK_SET);
 	u8* data = NULL;
 	*size = n;
-	if (n <= 0 || (size_t) n > max) {
+	if (n < 0) {
+		*why = "unreadable";
+	} else if (n == 0) {
+		*why = "empty"; // e.g. an FTP copy cut short
+	} else if ((size_t) n > max) {
 		*why = "too big";
 	} else if (!(data = malloc(n))) {
 		*why = "memory";
@@ -225,12 +228,6 @@ static bool has_saves(const char* game) {
 	return any;
 }
 
-static bool game_exists(const char* game) {
-	char path[512];
-	library_rom_path(game, path, sizeof(path));
-	return exists(path);
-}
-
 // The game a patch makes from `game`: the patch's name with the base ROM's extension, e.g.
 // "Some Hack.ups" on a GBA game -> "Some Hack" (roms/Some Hack.gba), on "X.gbc" -> "Some Hack.gbc".
 static void output_name(const char* game, const char* patch, char* out, size_t len, char* path, size_t path_len) {
@@ -316,7 +313,7 @@ static int list_patches(const char* game, struct patch_info* out) {
 		}
 		char made[256], made_path[512];
 		output_name(game, p->file, made, sizeof(made), made_path, sizeof(made_path));
-		if (p->fit != FIT_OTHER && game_exists(made)) {
+		if (p->fit != FIT_OTHER && library_game_exists(made)) {
 			p->fit = FIT_BUILT;
 		}
 		++n;
@@ -348,6 +345,18 @@ struct build {
 	s64 free_mb;                       // dev log: the drive's free space, -1 if unknown
 };
 
+// What to tell the player when read_whole() failed on the patch or the game file.
+static const char* read_error(const char* why, bool patch) {
+	if (strcmp(why, "memory") == 0) {
+		return "NOT ENOUGH MEMORY. RESTART PS3GBA AND TRY AGAIN.";
+	} else if (strcmp(why, "too big") == 0) {
+		return patch ? "THE PATCH FILE IS TOO BIG (64 MB AT MOST)." : "THE GAME FILE IS OVER 32 MB.";
+	} else if (strcmp(why, "empty") == 0) {
+		return patch ? "THE PATCH FILE IS EMPTY. COPY IT AGAIN." : "THE GAME FILE IS EMPTY.";
+	}
+	return patch ? "CAN'T READ THE PATCH FILE. COPY IT AGAIN." : "CAN'T READ THE GAME FILE.";
+}
+
 static bool fail(struct patch_result* r, const char* error) {
 	snprintf(r->error, sizeof(r->error), "%s", error);
 	return false;
@@ -358,15 +367,13 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 	library_rom_path(game, rom_path, sizeof(rom_path));
 	snprintf(patch_path, sizeof(patch_path), "%s/%s", PATCH_DIR, patch_file);
 	output_name(game, patch_file, r->game, sizeof(r->game), out_path, sizeof(out_path));
-	if (game_exists(r->game)) {
+	if (library_game_exists(r->game)) {
 		snprintf(error, sizeof(error), "%.80s IS ALREADY A GAME. RENAME THE PATCH FILE TO MAKE ANOTHER ONE.", r->game);
 		return fail(r, error);
 	}
 	const char* why;
 	if (!(b->patch = read_whole(patch_path, PATCH_FILE_MAX, &b->patch_size, &why))) {
-		return fail(r, strcmp(why, "memory") == 0 ? "NOT ENOUGH MEMORY. RESTART PS3GBA AND TRY AGAIN."
-		             : strcmp(why, "too big") == 0 ? "THE PATCH FILE IS TOO BIG (64 MB AT MOST)."
-		             : "CAN'T READ THE PATCH FILE. COPY IT AGAIN.");
+		return fail(r, read_error(why, true));
 	}
 	struct Patch patch;
 	const char* format = b->patch_size >= 12 ? rompatch_format(b->patch) : NULL;
@@ -375,8 +382,7 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 		return fail(r, "THE PATCH FILE IS DAMAGED, OR NOT AN IPS, UPS OR BPS PATCH. COPY IT AGAIN.");
 	}
 	if (!(b->rom = read_whole(rom_path, ROM_MAX, &b->rom_size, &why))) {
-		return fail(r, strcmp(why, "memory") == 0 ? "NOT ENOUGH MEMORY. RESTART PS3GBA AND TRY AGAIN."
-		             : strcmp(why, "too big") == 0 ? "THE GAME FILE IS OVER 32 MB." : "CAN'T READ THE GAME FILE.");
+		return fail(r, read_error(why, false));
 	}
 	u32 base_crc = doCrc32(b->rom, b->rom_size);
 	remember_crc(game, base_crc);
@@ -426,7 +432,10 @@ static bool build_rom(const char* game, const char* patch_file, struct build* b,
 		remove(tmp);
 		return fail(r, "COULD NOT WRITE THE NEW GAME. IS THE DRIVE FULL?");
 	}
-	if (game_exists(r->game) || rename(tmp, out_path) != 0) { // never over a game (a phone upload meanwhile)
+	library_place_lock(); // a phone upload of that name meanwhile: one of them gets it
+	ok = !library_game_exists(r->game) && library_place(tmp, out_path);
+	library_place_unlock();
+	if (!ok) {
 		remove(tmp);
 		snprintf(error, sizeof(error), "%.80s IS ALREADY A GAME. RENAME THE PATCH FILE TO MAKE ANOTHER ONE.", r->game);
 		return fail(r, error);
@@ -461,26 +470,41 @@ static void build(const char* game, const char* patch_file, struct patch_result*
 }
 
 static void clean(const char* patch_file, const char* base, struct patch_result* r) {
-	char path[512];
+	char path[512], error[160];
 	snprintf(path, sizeof(path), "%s/%s", PATCH_DIR, patch_file);
-	r->ok = remove(path) == 0;
+	r->ok = remove(path) == 0 || !exists(path); // gone already: another player deleted it
 	if (!r->ok) {
 		fail(r, "COULD NOT DELETE THE PATCH FILE.");
 	}
+	// Checked again, under the place lock (a phone save upload for it waits): never a ROM ps3gba
+	// did not build, nor one with saves. Gone already is fine (another player's cleanup).
+	const char* kept = NULL;
+	bool deleted = false;
 	u32 crc;
-	// Checked again: never a ROM ps3gba did not build, nor one with saves.
-	if (base[0] && rom_crc(base, &crc) && record_has(base, crc) && !has_saves(base)) {
-		library_rom_path(base, path, sizeof(path));
-		if (remove(path) == 0) {
-			record_remove(base);
+	library_place_lock();
+	if (base[0] && library_game_exists(base)) {
+		if (!rom_crc(base, &crc)) {
+			kept = "IT COULD NOT BE READ";
+		} else if (!record_has(base, crc)) {
+			kept = "IT CHANGED SINCE PS3GBA BUILT IT";
+		} else if (has_saves(base)) {
+			kept = "IT HAS SAVES NOW";
+		} else {
+			library_rom_path(base, path, sizeof(path));
+			deleted = remove(path) == 0;
+			kept = deleted ? NULL : "ITS FILE COULD NOT BE DELETED";
 			snprintf(path, sizeof(path), "%s/%s", SAVE_DIR, base);
 			rmdir(path); // empty, if there at all
-			library_rescan(NULL);
-		} else {
-			r->ok = fail(r, "COULD NOT DELETE THE GAME FILE.");
 		}
-	} else if (base[0]) {
-		r->ok = fail(r, "THE OLD GAME WAS KEPT: IT HAS SAVES NOW.");
+	}
+	library_place_unlock();
+	if (deleted) {
+		record_remove(base);
+		library_rescan(NULL);
+	}
+	if (kept) {
+		snprintf(error, sizeof(error), "%.80s WAS KEPT: %s.", base, kept);
+		r->ok = fail(r, error);
 	}
 	log_printf("patch: deleted %s%s%s %s%s\n", patch_file, base[0] ? " and " : "", base, r->ok ? "done" : "failed: ",
 	           r->ok ? "" : r->error);
@@ -552,28 +576,39 @@ static void patch_thread(void* arg) {
 	}
 }
 
-static void start_thread(void) {
-	static bool started;
-	if (started) {
-		return;
+// False if the thread can't be created (tried again at the next request).
+static bool start_thread(void) {
+	static bool ready, started;
+	if (!ready) {
+		sys_mutex_attr_t mutex_attr;
+		sysMutexAttrInitialize(mutex_attr);
+		sysMutexCreate(&lock, &mutex_attr);
+		sys_cond_attr_t cond_attr;
+		sysCondAttrInitialize(cond_attr);
+		sysCondCreate(&wake, lock, &cond_attr);
+		ready = true;
 	}
-	sys_mutex_attr_t mutex_attr;
-	sysMutexAttrInitialize(mutex_attr);
-	sysMutexCreate(&lock, &mutex_attr);
-	sys_cond_attr_t cond_attr;
-	sysCondAttrInitialize(cond_attr);
-	sysCondCreate(&wake, lock, &cond_attr);
-	sys_ppu_thread_t thread;
-	// Below the emulators (1200): checksumming ROMs for a list must not cost anyone a frame. A
-	// build runs while nobody plays.
-	sysThreadCreate(&thread, patch_thread, NULL, 1250, 64 * 1024, 0, "patches");
-	started = true;
+	if (!started) {
+		sys_ppu_thread_t thread;
+		// Below the emulators (1200): checksumming ROMs for a list must not cost anyone a frame. A
+		// build runs while nobody plays. 256 KB like the covers thread: library_rescan() decodes
+		// cover PNGs.
+		started = sysThreadCreate(&thread, patch_thread, NULL, 1250, 256 * 1024, 0, "patches") == 0;
+		if (!started) {
+			log_printf("patch: could not create its thread\n");
+		}
+	}
+	return started;
 }
 
 void rompatch_list_async(int slot, const char* game) {
-	start_thread();
+	bool thread = start_thread();
 	sysMutexLock(lock, 0);
 	snprintf(lists[slot].game, sizeof(lists[slot].game), "%s", game);
+	if (!thread) { // the answer right away: it can't
+		lists[slot].n = -2;
+		lists[slot].done = lists[slot].want + 1;
+	}
 	++lists[slot].want;
 	sysCondBroadcast(wake);
 	sysMutexUnlock(lock);
@@ -590,11 +625,18 @@ int rompatch_list_result(int slot, struct patch_info* out) {
 }
 
 static bool start_job(int slot, bool cleanup, const char* game, const char* patch, const char* base) {
-	start_thread();
+	bool thread = start_thread();
 	if (job.slot >= 0) {
 		return false;
 	}
 	sysMutexLock(lock, 0);
+	if (!thread) { // done at once with what to do: no game stays refused
+		job.result = (struct patch_result) { .error = "COULD NOT START PATCHING. RESTART PS3GBA AND TRY AGAIN." };
+		job_step = STEP_DONE;
+		job.slot = slot;
+		sysMutexUnlock(lock);
+		return true;
+	}
 	job.clean = cleanup;
 	job.taken = false;
 	snprintf(job.game, sizeof(job.game), "%s", game);

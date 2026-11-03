@@ -20,7 +20,6 @@
 #include <net/netctl.h>
 #include <netinet/in.h>
 #include <ppu-lv2.h>
-#include <sys/mutex.h>
 #include <sys/systime.h>
 #include <sys/thread.h>
 #include <sysmodule/sysmodule.h>
@@ -63,7 +62,6 @@ struct conn {
 };
 
 static volatile int active_conns;
-static sys_mutex_t place_lock; // checking a final name and renaming into it
 static unsigned tmp_counter;
 
 // ---------------------------------------------------------------------------------------------
@@ -215,7 +213,7 @@ static void go_ahead(struct conn* c) {
 // Clients that asked first (Expect) never sent it.
 static void drain(struct conn* c) {
 	long left = c->length - c->body_len;
-	if (c->expect || left > ROM_MAX) {
+	if (c->expect || left > PATCH_FILE_MAX) { // more than any upload we take
 		return;
 	}
 	while (left > 0) {
@@ -379,11 +377,6 @@ static bool is_cover(const char* path) {
 	return w > 0 && h > 0 && w <= 1024 && h <= 1024;
 }
 
-// Renames tmp to path, which must not exist yet (call with place_lock held).
-static bool place(const char* tmp, const char* path) {
-	return !exists(path) && rename(tmp, path) == 0;
-}
-
 static void delete_tmp_files(void) {
 	DIR* dir = opendir(TMP_DIR);
 	if (!dir) {
@@ -520,9 +513,9 @@ static void post_rom(struct conn* c, const char* query) {
 		reply(c, 415, system == SYS_GBA ? "NOT A GBA GAME" : "NOT A GB OR GBC GAME");
 		return;
 	}
-	sysMutexLock(place_lock, 0);
-	ok = place(tmp, path);
-	sysMutexUnlock(place_lock);
+	library_place_lock();
+	ok = !library_game_exists(name) && library_place(tmp, path); // in any folder (a ROM patch build meanwhile)
+	library_place_unlock();
 	if (!ok) {
 		remove(tmp);
 		reply(c, 409, "ALREADY ON THE PS3");
@@ -553,9 +546,9 @@ static void post_patch(struct conn* c, const char* query) {
 		reply(c, 400, "BAD FILE NAME");
 		return;
 	}
-	if (c->length < 8 || c->length > ROM_MAX) {
+	if (c->length < 8 || c->length > PATCH_FILE_MAX) {
 		drain(c);
-		reply(c, 413, "NOT A PATCH (32 MB AT MOST)");
+		reply(c, 413, "NOT A PATCH (64 MB AT MOST)");
 		return;
 	}
 	snprintf(path, sizeof(path), "%s/%s", PATCH_DIR, name);
@@ -573,9 +566,9 @@ static void post_patch(struct conn* c, const char* query) {
 		reply(c, 415, "NOT AN IPS, UPS OR BPS PATCH");
 		return;
 	}
-	sysMutexLock(place_lock, 0);
-	ok = place(tmp, path);
-	sysMutexUnlock(place_lock);
+	library_place_lock();
+	ok = library_place(tmp, path);
+	library_place_unlock();
 	if (!ok) {
 		remove(tmp);
 		reply(c, 409, "ALREADY ON THE PS3");
@@ -607,10 +600,10 @@ static void post_cover(struct conn* c, const char* query) {
 		return;
 	}
 	snprintf(path, sizeof(path), "%s/%s.png", COVER_DIR, game);
-	sysMutexLock(place_lock, 0);
+	library_place_lock();
 	remove(path); // lv2 may refuse to rename over a file
 	bool ok = rename(tmp, path) == 0;
-	sysMutexUnlock(place_lock);
+	library_place_unlock();
 	if (!ok) {
 		remove(tmp);
 		reply(c, 500, "COULD NOT SAVE THE COVER");
@@ -645,9 +638,11 @@ static void post_save(struct conn* c, const char* query) {
 	// open counts as taken even before it reaches the drive (a new save only does at its first
 	// write). Shortcut: a player starting a new save in the same instant could still pick the
 	// same name (main.c's new_save_name reads the drive before); names differ in practice.
-	sysMutexLock(place_lock, 0);
-	bool ok = false;
-	for (int i = 1; i < 100 && !ok; ++i) {
+	library_place_lock();
+	// Its game may have been deleted meanwhile (ROM patching's cleanup checks for saves under
+	// this lock): no save for a game that is gone.
+	bool gone = !library_game_exists(game), ok = false;
+	for (int i = 1; i < 100 && !ok && !gone; ++i) {
 		snprintf(name, sizeof(name), i == 1 ? "%s" : "%s %d", want, i);
 		share_lock();
 		bool open = false;
@@ -656,9 +651,14 @@ static void post_save(struct conn* c, const char* query) {
 		}
 		share_unlock();
 		library_save_path(game, name, path, sizeof(path));
-		ok = !open && place(tmp, path);
+		ok = !open && library_place(tmp, path);
 	}
-	sysMutexUnlock(place_lock);
+	library_place_unlock();
+	if (gone) {
+		remove(tmp);
+		reply(c, 404, "GAME NOT FOUND");
+		return;
+	}
 	if (!ok) {
 		remove(tmp);
 		reply(c, 409, "TOO MANY SAVES NAMED %s", want);
@@ -862,9 +862,6 @@ static void server_thread(void* arg) {
 
 void web_init(void) {
 	share_init();
-	sys_mutex_attr_t attr;
-	sysMutexAttrInitialize(attr);
-	sysMutexCreate(&place_lock, &attr);
 	sys_ppu_thread_t thread;
 	sysThreadCreate(&thread, server_thread, NULL, WEB_PRIORITY, 64 * 1024, 0, "web server");
 }
